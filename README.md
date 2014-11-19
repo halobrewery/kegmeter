@@ -1,4 +1,4 @@
 kegmeter
 ========
 
-A beer weight monitoring meter for Halo to show patrons how much beer is left in a keg and track consumption.
+A beer weight monitoring meter to show patrons how much beer is left in a keg and to track keg consumption over time.
