@@ -12,24 +12,29 @@ public:
   
   KegLoadMeter(uint8_t meterIdx, Adafruit_NeoPixel& strip);
   ~KegLoadMeter() {}
-  
-  void updateAndShow(float approxLoadInKg);
 
-  void setMeterPercentage(float percent, boolean drawEmptyLEDs = true, boolean doShow = true);
-  void showEmptyAnimation(uint8_t pulseTimeInMillis, uint8_t numPulses);
-  void showCalibratingAnimation(uint8_t delayMillis, float percentCalibrated, boolean doShowAndDelay = true);
+  void testTick(uint32_t frameDeltaMillis, float approxLoadInKg);
+  
+  void updateAndShow(uint32_t frameDeltaMillis, float approxLoadInKg);
+
+  void setMeterPercentage(float percent, boolean drawEmptyLEDs = true);
+  boolean showEmptyAnimation(uint8_t pulseTimeInMillis, uint8_t numPulses);
+  void showCalibratingAnimation(uint8_t delayMillis, float percentCalibrated, boolean resetDelayCounter = false);
   boolean showCalibratedAnimation(uint8_t delayMillis);
   
-  void turnOff(boolean doShow = true);
+  void turnOff();
   
 private:
   const uint8_t meterIdx;          // The zero-based index of this meter in the LED strip
   const uint16_t startLEDIdx;
   
   // Stateful members: keep track of information in various states
+  uint32_t delayCounterMillis;   // Used across all states for tracking the total delay in ms
+  uint8_t calibratingAnimLEDIdx; // State: Calibrating
   uint16_t calibratedAnimLEDIdx; // State: Calibrated
   float calibratedFullLoadAmt;   // State: Calibrated, Measuring
-  
+  uint8_t emptyAnimPulseCount;
+  float calibratedEmptyLoadAmt;  // State: EmptyCalibration, Empty, JustBecameEmpty, Measuring
   
   static const int LOAD_WINDOW_SIZE = 50; // Never make this bigger than 255!!
   uint8_t loadWindowIdx;
@@ -40,6 +45,7 @@ private:
   Adafruit_NeoPixel& strip;  // The LED strip object
   
   enum State {
+    EmptyCalibration,
     Empty,
     Calibrating,
     Calibrated,

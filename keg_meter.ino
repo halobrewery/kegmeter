@@ -30,6 +30,8 @@ KegLoadMeter kegMeter = KegLoadMeter(0, strip);
 // TODO: Calibration procedure (for "empty sensors") -- have a serial protocol for this, we don't
 // want to have it happen whenever the system is rebooted or some such not-so-carefully-controlled circumstance
 
+
+
 void setup() {
   Serial.begin(9600);
   
@@ -37,16 +39,24 @@ void setup() {
   strip.show(); // Initialize all pixels to 'off'
 }
 
-void loop() {  
-  /*
-  for (int i = strip.numPixels(); i >= 0; i--) {
-     kegMeter.setMeterPercentage(((float)i)/(float)(strip.numPixels()));
-     delay(100);
-  }
-  */
+//int i = 0;
+void loop() {
+  
+  kegMeter.testTick(10, 1);
+  
+  
+  //kegMeter.setMeterPercentage(((float)i)/(float)(strip.numPixels()));
+  //i++;
+
   
   //kegMeter.showEmptyAnimation(500, 4);
-  //kegMeter.showCalibratingAnimation(125, 1.0);
-  kegMeter.showCalibratedAnimation(125);
+  //kegMeter.showCalibratingAnimation(20, 1.0);
+  kegMeter.showCalibratedAnimation(25);
+  
+  
+  // TODO:
+  // All delays and redraw (i.e., "show") of the strip is done at the end of a frame
+  strip.show();
+  delay(10);
 }
 

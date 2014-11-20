@@ -11,34 +11,39 @@ const uint8_t KegLoadMeter::DEAD_BRIGHTNESS  = 2;
 const uint8_t KegLoadMeter::DEATH_PULSE_BRIGHTNESS = 50;
 const uint8_t KegLoadMeter::BASE_CALIBRATING_BRIGHTNESS = 40;
 
-#define KEG_MASS 13.5
-#define EMPTY_TO_CALIBRATING_MASS (KEG_MASS + 2) // This needs to be a bit more massful than a keg
+#define EMPTY_TO_CALIBRATING_MASS 1 // This needs to be a bit more massful than a keg
 
 #define MINIMUM_VARIANCE_TO_FINISH_CALIBRATING (0.25 * 0.25)
 #define LERP(x, x0, x1, y0, y1) (y0 + (y1-y0) * (x-x0) / (x1-x0))
 
-#define CALIBRATE_ANIM_DELAY_MS 125
+#define CALIBRATE_ANIM_DELAY_MS 25
 #define EMPTY_ANIM_PULSE_MS 500
 
 KegLoadMeter::KegLoadMeter(uint8_t meterIdx, Adafruit_NeoPixel& strip) : 
   meterIdx(meterIdx), startLEDIdx(meterIdx*NUM_LEDS_PER_METER), loadWindowIdx(0), 
-  calibratedAnimLEDIdx(0), currState(Empty), strip(strip) {
+  calibratingAnimLEDIdx(0), calibratedAnimLEDIdx(0), currState(Empty), strip(strip), 
+  calibratedEmptyLoadAmt(0), delayCounterMillis(0) {
   
   // Fill the load window with empty data
   this->fillLoadWindow(0.0);
 }
 
-// TODO:
-// Do a box filter window for about 10 seconds with 100 samples in it... or something.
+void KegLoadMeter::testTick(uint32_t frameDeltaMillis, float approxLoadInKg) {
+  this->putInLoadWindow(approxLoadInKg);
+  this->delayCounterMillis += frameDeltaMillis;
+}
 
-void KegLoadMeter::updateAndShow(float approxLoadInKg) {
+void KegLoadMeter::updateAndShow(uint32_t frameDeltaMillis, float approxLoadInKg) {
   this->putInLoadWindow(approxLoadInKg);
   
   switch (this->currState) {
-    
+    case EmptyCalibration:
+      // TODO: have a timer/counter for filling the load window and getting the average "empty" value
+      break;
+      
     case Empty:
       // LEDs are all turned off
-      this->turnOff(true);
+      this->turnOff();
       
       // TODO: Calibrate what empty is... need to set up the system to do this!!!
       
@@ -80,7 +85,7 @@ void KegLoadMeter::updateAndShow(float approxLoadInKg) {
     case Measuring:
       // The meter is being set by the current load amount based on a linear interpolation between
       // the initial calibrated full load and a reasonable "zero" load
-      // TODO
+      
       break;
       
     case JustBecameEmpty:
@@ -92,16 +97,23 @@ void KegLoadMeter::updateAndShow(float approxLoadInKg) {
       assert(false);
       return; 
   }
+  
+  this->delayCounterMillis += frameDeltaMillis;
 }
 
 void KegLoadMeter::setState(State newState) {
   switch (newState) {
+    
+    case EmptyCalibration:
+      break;
+      
     case Empty:
-      this->turnOff(true);
+      this->turnOff();
       break;
       
     case Calibrating:
       // In this state we will be playing the calibration animation
+      this->calibratingAnimLEDIdx = 0;
       break;
       
     case Calibrated:
@@ -113,6 +125,7 @@ void KegLoadMeter::setState(State newState) {
       break;
       
     case JustBecameEmpty:
+      this->emptyAnimPulseCount = 0;
       break;
     
     default:
@@ -128,7 +141,7 @@ void KegLoadMeter::setState(State newState) {
  * Params:
  * percent - The percentage to set [0,1].
  */
-void KegLoadMeter::setMeterPercentage(float percent, boolean drawEmptyLEDs, boolean doShow) {
+void KegLoadMeter::setMeterPercentage(float percent, boolean drawEmptyLEDs) {
   uint16_t idx = this->startLEDIdx;
   uint16_t litEndIdx = idx + ceil(percent * KegLoadMeter::NUM_LEDS_PER_METER);
   uint16_t meterEndIdx = idx + KegLoadMeter::NUM_LEDS_PER_METER;
@@ -142,23 +155,26 @@ void KegLoadMeter::setMeterPercentage(float percent, boolean drawEmptyLEDs, bool
       this->strip.setPixelColor(idx, getEmptyColour());
     }
   }
-  if (doShow) {
-    this->strip.show();
-  }
 }
 
-void KegLoadMeter::showEmptyAnimation(uint8_t pulseTimeInMillis, uint8_t numPulses) {
-  uint16_t meterEndIdx = this->startLEDIdx + KegLoadMeter::NUM_LEDS_PER_METER;
-  uint16_t pulseCycles = 2*numPulses;
-  
-  for (uint8_t pulseIdx = 0; pulseIdx < pulseCycles; pulseIdx++) {
-    uint32_t deathColour = getEmptyAnimationColour(pulseIdx);
-    for (uint16_t idx = this->meterIdx * KegLoadMeter::NUM_LEDS_PER_METER; idx <= meterEndIdx; idx++) {
-      this->strip.setPixelColor(idx, deathColour);
-    }
-    this->strip.show();
-    delay(pulseTimeInMillis);
+boolean KegLoadMeter::showEmptyAnimation(uint8_t pulseTimeInMillis, uint8_t numPulses) {
+
+  uint16_t meterEndIdx = this->startLEDIdx + KegLoadMeter::NUM_LEDS_PER_METER;  
+  uint32_t deathColour = getEmptyAnimationColour(this->emptyAnimPulseCount);
+  for (uint16_t idx = this->meterIdx * KegLoadMeter::NUM_LEDS_PER_METER; idx <= meterEndIdx; idx++) {
+    this->strip.setPixelColor(idx, deathColour);
   }
+  
+  if (this->delayCounterMillis >= pulseTimeInMillis) {
+    this->emptyAnimPulseCount++;
+    this->delayCounterMillis = 0;
+  }
+  
+  if (this->emptyAnimPulseCount > 2*numPulses) {
+    return true;
+  }
+  
+  return false;
 }
 
 /**
@@ -168,20 +184,19 @@ void KegLoadMeter::showEmptyAnimation(uint8_t pulseTimeInMillis, uint8_t numPuls
  * percentCalibrated - The percentage that the calibration is complete in [0,1]. 0 being 
  * not calibrated at all, 1 being fully calibrated.
  */
-void KegLoadMeter::showCalibratingAnimation(uint8_t delayMillis, float percentCalibrated, boolean doShowAndDelay) {
+void KegLoadMeter::showCalibratingAnimation(uint8_t delayMillis, float percentCalibrated, boolean resetDelayCounter) {
 
   static const uint8_t OFFSET = 4;
   static const uint8_t TRAIL_SIZE = 9;
-  static uint8_t SPIN_COUNTER = 0;
   
-  this->turnOff(false);
+  this->turnOff();
   
   // Draw spinning loading wheels on each of the rings...
   const uint8_t mostBright = (uint8_t)max(TRAIL_SIZE, percentCalibrated * BASE_CALIBRATING_BRIGHTNESS);
   for (int ringIdx = 0; ringIdx < NUM_RINGS_PER_METER; ringIdx++) {
     int16_t currRingStartLEDIdx = this->startLEDIdx + ringIdx * NUM_LEDS_PER_RING;
     int16_t currRingEndLEDIdx = currRingStartLEDIdx + NUM_LEDS_PER_RING;
-    int16_t currLEDIdx = currRingStartLEDIdx + SPIN_COUNTER;
+    int16_t currLEDIdx = currRingStartLEDIdx + this->calibratingAnimLEDIdx;
     
     // Bright pixel and a trail...
     for (uint8_t trailIdx = 0; trailIdx < TRAIL_SIZE; trailIdx++) {
@@ -198,39 +213,38 @@ void KegLoadMeter::showCalibratingAnimation(uint8_t delayMillis, float percentCa
     }
   }
   
-  SPIN_COUNTER = (SPIN_COUNTER + 1) % NUM_LEDS_PER_RING;
-  
-  if (doShowAndDelay) {
-    this->strip.show();
-    delay(delayMillis);
+  if (this->delayCounterMillis >= delayMillis) {
+    this->calibratingAnimLEDIdx = (this->calibratingAnimLEDIdx + 1) % NUM_LEDS_PER_RING;
+    if (resetDelayCounter) {
+      this->delayCounterMillis = 0;
+    }
   }
 }
 
 boolean KegLoadMeter::showCalibratedAnimation(uint8_t delayMillis) {
-  this->showCalibratingAnimation(0, 1.0, false);
+  this->showCalibratingAnimation(delayMillis, 1.0, false);
   
   // Start filling the meter
-  this->setMeterPercentage(((float)this->calibratedAnimLEDIdx)/((float)strip.numPixels()), false, false);
-  
-  this->strip.show();
-  delay(delayMillis);
- 
+  this->setMeterPercentage(((float)this->calibratedAnimLEDIdx)/((float)strip.numPixels()), false);
+  Serial.println(this->calibratedAnimLEDIdx);
+   
+  if (this->delayCounterMillis >= delayMillis) {
+    this->calibratedAnimLEDIdx++;
+    this->delayCounterMillis = 0;
+  }
+   
   if (this->calibratedAnimLEDIdx == this->strip.numPixels()) {
     return true;
   }
 
-  this->calibratedAnimLEDIdx++;
   return false;
 }
 
-void KegLoadMeter::turnOff(boolean doShow) {
+void KegLoadMeter::turnOff() {
   uint16_t idx = this->startLEDIdx;
   uint16_t meterEndIdx = idx + KegLoadMeter::NUM_LEDS_PER_METER;
   for (; idx < meterEndIdx; idx++) {
     this->strip.setPixelColor(idx, 0);
-  }
-  if (doShow) {
-    this->strip.show();
   }
 }
 
