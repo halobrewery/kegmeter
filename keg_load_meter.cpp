@@ -24,8 +24,9 @@ const uint8_t KegLoadMeter::BASE_CALIBRATING_BRIGHTNESS = 40;
 #define EMPTY_TO_CALIBRATING_MASS (AVG_EMPTY_CORNY_KEG_MASS_KG-0.5)
 
 #define EMPTY_CALIBRATION_TIME_MS 10000
-#define CALIBRATE_ANIM_DELAY_MS 25
-#define EMPTY_ANIM_PULSE_MS 500
+#define CALIBRATE_ANIM_DELAY_MS 5
+#define EMPTY_ANIM_PULSE_MS 100
+#define NUM_EMPTY_PULSES 5
 
 KegLoadMeter::KegLoadMeter(uint8_t meterIdx, Adafruit_NeoPixel& strip) : 
   meterIdx(meterIdx), startLEDIdx(meterIdx*NUM_LEDS_PER_METER), loadWindowIdx(0), 
@@ -56,7 +57,7 @@ void KegLoadMeter::testTick(uint32_t frameDeltaMillis, float approxLoadInKg) {
   this->delayCounterMillis += frameDeltaMillis;
 }
 
-void KegLoadMeter::updateAndShow(uint32_t frameDeltaMillis, float approxLoadInKg) {
+void KegLoadMeter::tick(uint32_t frameDeltaMillis, float approxLoadInKg) {
   this->putInLoadWindow(approxLoadInKg);
   
   switch (this->currState) {
@@ -96,7 +97,7 @@ void KegLoadMeter::updateAndShow(uint32_t frameDeltaMillis, float approxLoadInKg
       else {
         // Wait until the variance goes below a certain threshold...
         float percentCalibrated = max(0.0, min(1.0, LERP(this->loadWindowVariance, MINIMUM_VARIANCE_TO_FINISH_CALIBRATING, 1, 1.0, 0.0)));
-        this->showCalibratingAnimation(CALIBRATE_ANIM_DELAY_MS, percentCalibrated);
+        this->showCalibratingAnimation(CALIBRATE_ANIM_DELAY_MS, percentCalibrated, true);
         
         if (percentCalibrated >= 1.0 && DATA_COUNTER >= LOAD_WINDOW_SIZE) {
           DATA_COUNTER = 0;
@@ -119,23 +120,27 @@ void KegLoadMeter::updateAndShow(uint32_t frameDeltaMillis, float approxLoadInKg
       }
       break;
       
-    case Measuring:
+    case Measuring: {
       // We need to be mindful of the empty keg mass -- even when the keg has nothing in it, it will still weigh something!
     
       // The meter is being set by the current load amount based on a linear interpolation between
       // the initial calibrated full load and a reasonable "zero" load
-      
+      float currPercentAmt = LERP(this->getLoadWindowMean(), this->calibratedEmptyLoadAmt, this->calibratedFullLoadAmt, 0.0, 1.0);
+      this->setMeterPercentage(currPercentAmt);
+      if (currPercentAmt <= 0.01) {
+        this->setState(JustBecameEmpty); 
+      }
 
-      
-      
       break;
-      
+    }
     case JustBecameEmpty:
-      this->showEmptyAnimation(EMPTY_ANIM_PULSE_MS, 4); // This is "blocking" for the entire animation
-      this->setState(EmptyWithKeg);
+      if (this->showEmptyAnimation(EMPTY_ANIM_PULSE_MS, NUM_EMPTY_PULSES)) {
+        this->setState(EmptyWithKeg);
+      }
       break;
       
     case EmptyWithKeg:
+      // TODO
       break;
     
     default:

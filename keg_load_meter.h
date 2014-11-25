@@ -21,7 +21,7 @@ public:
   void setKegType(KegType kegType);
 
   void testTick(uint32_t frameDeltaMillis, float approxLoadInKg);
-  void updateAndShow(uint32_t frameDeltaMillis, float approxLoadInKg);
+  void tick(uint32_t frameDeltaMillis, float approxLoadInKg);
 
   void setMeterPercentage(float percent, boolean drawEmptyLEDs = true);
   boolean showEmptyAnimation(uint8_t pulseTimeInMillis, uint8_t numPulses);

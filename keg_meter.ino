@@ -2,9 +2,8 @@
 #include "keg_load_meter.h"
 
 #define OUTPUT_PIN 6
-
-#define NUM_METERS 1
-#define NUM_LEDS (NUM_METERS * KegLoadMeter::NUM_LEDS_PER_METER)
+#define NUM_KEGS 1
+#define NUM_LEDS (NUM_KEGS * KegLoadMeter::NUM_LEDS_PER_METER)
 
 
 
@@ -25,11 +24,27 @@ Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUM_LEDS, OUTPUT_PIN, NEO_GRB + NEO_
 // Each keg will require an instance of the KegLoadMeter object, these will
 // each be updated with mass/weight data from sensors for that keg and will show
 // the appropriate animations/metering in a robust manor based on sensor calibration
-#define NUM_KEG_METERS 1
+
 KegLoadMeter kegMeters[] = { KegLoadMeter(0, strip) };
+float kegLoadsInKg[NUM_KEGS];
+
+// Simulation defines
+#define DEFAULT_DELAY_TICK_MS 1
+
+// Serial protocol defines
+#define METER_SELECT_CHAR 'm'
+#define ALL_METERS_CHAR 'a'
+#define EMPTY_CALIBRATE_MODE_CHAR 'E'
+#define KEG_TYPE_CHANGE_CHAR 'T'
+#define FILL_LOAD_WINDOW_CHAR 'L'
+#define PKG_BEGIN_CHAR '|'
 
 void setup() {
   Serial.begin(9600);
+  
+  for (int i = 0; i < NUM_KEGS; i++) {
+    kegLoadsInKg[i] = 0; 
+  }
   
   strip.begin();
   strip.show(); // Initialize all pixels to 'off'
@@ -38,53 +53,60 @@ void setup() {
 //int count = 0;
 void loop() {
   
+  // Keg modes/calibration can be set via serial...
   readSerialCommands();
   
+  // Perform sensor readings...
+  // TODO
   
-  kegMeters[0].testTick(10, 1);
+  
+  // Perform meter rendering...
+  for (int kegIdx = 0; kegIdx < NUM_KEGS; kegIdx++) {
+    
+    //kegMeters[kegIdx].testTick(DEFAULT_DELAY_TICK_MS, 1);
+    kegMeters[kegIdx].tick(DEFAULT_DELAY_TICK_MS, kegLoadsInKg[kegIdx]);
+  }
   
   //kegMeters[0].setMeterPercentage(((float)i)/(float)(strip.numPixels()));
   //count++;
 
-  //kegMeters[0].showEmptyAnimation(500, 4);
-  kegMeters[0].showCalibratingAnimation(20, 1.0);
+  //kegMeters[0].showEmptyAnimation(60, 4);
+  //kegMeters[0].showCalibratingAnimation(5, 1.0, true);
   //kegMeters[0].showCalibratedAnimation(25);
   
-  
-  // TODO:
   // All delays and redraw (i.e., "show") of the strip is done at the end of a frame
   strip.show();
-  delay(10);
+  delay(DEFAULT_DELAY_TICK_MS);
 }
 
 // Checks for available serial data -- this can guide certain operations for the meters, including
 // calibration of the load sensors when no keg is placed on them ("empty calibration")
 // Empty calibration message (all meters): '|Ea'
-// Empty calibration message (specific meter): '|Esx', where 'x' is the zero-based index of the meter
-// Keg type message (all meters): '|Tay', where 'y' is the type: 0 for corny keg, and 1 for 50L sankey keg
-// Keg type message (specific meter): '|Tsxy', where 'x' is the zero-based index of the meter, and 'y' is the type
+// Empty calibration message (specific meter): '|Emx', where 'x' is the zero-based index of the meter
+// Keg type message (all meters): '|Tay', where 'y' is the type: 'c' for corny keg, and 's' for 50L sankey keg
+// Keg type message (specific meter): '|Tmxy', where 'x' is the zero-based index of the meter, and 'y' is the type
+// Set the loads for all kegs '|Lx', where 'x' is the floating point value to fill the load window with in kg
 void readSerialCommands() {
 
   if (Serial.available() >= 3) {
-    boolean commandFailed = false;
-    
+
     char serialReadByte = Serial.read();
-    if (serialReadByte == '|') {
+    if (serialReadByte == PKG_BEGIN_CHAR) {
       
       // Read the command
       serialReadByte = Serial.read();
       switch (serialReadByte) {
         
-        case 'E':
+        case EMPTY_CALIBRATE_MODE_CHAR:
           serialReadByte = Serial.read();
-          if (serialReadByte == 'a') {
+          if (serialReadByte == ALL_METERS_CHAR) {
             // Empty calibration for all meters
             Serial.println("Performing Empty Calibration on all kegs...");
-            for (int i = 0; i < NUM_KEG_METERS; i++) {
+            for (int i = 0; i < NUM_KEGS; i++) {
               kegMeters[i].doEmptyCalibration();
             }
           }
-          else if (serialReadByte == 's') {
+          else if (serialReadByte == METER_SELECT_CHAR) {
             // Empty calibration for a specific meter...
             
             // There should be another part of the message, wait for it
@@ -92,85 +114,94 @@ void readSerialCommands() {
             
             // Get the meter index to calibrate for...
             int meterIdx = Serial.parseInt();
-            if (meterIdx < NUM_KEG_METERS && meterIdx >= 0) {
+            if (meterIdx < NUM_KEGS && meterIdx >= 0) {
               Serial.print("Performing Empty Calibration on keg index ");
               Serial.print(meterIdx);
               Serial.println("...");
               kegMeters[meterIdx].doEmptyCalibration();
             }
             else {
-              commandFailed = true;
               Serial.print("Command failed, no keg found with index ");
               Serial.println(meterIdx);
             }
           }
           else {
-            commandFailed = true;
             Serial.println("Command failed, option not found.");
           }
           break;
           
-        case 'T':
+        case KEG_TYPE_CHANGE_CHAR:
           serialReadByte = Serial.read();
-          if (serialReadByte == 'a') {
+          if (serialReadByte == ALL_METERS_CHAR) {
             // There should be another part of the message, wait for it
             while (Serial.available() == 0);
             int kegType = Serial.parseInt();
-            for (int i = 0; i < NUM_KEG_METERS; i++) {
+            for (int i = 0; i < NUM_KEGS; i++) {
               setKegType(kegMeters[i], kegType);
             }
           }
-          else if (serialReadByte == 's') {
+          else if (serialReadByte == METER_SELECT_CHAR) {
             // There should be another part of the message, wait for it
             while (Serial.available() == 0);
             
             // Get the meter index
             int meterIdx = Serial.parseInt();
-            if (meterIdx < NUM_KEG_METERS && meterIdx >= 0) {
+            if (meterIdx < NUM_KEGS && meterIdx >= 0) {
               // There should be another part of the message, wait for it
               while (Serial.available() == 0);
-              setKegType(kegMeters[meterIdx], Serial.parseInt());
+              setKegType(kegMeters[meterIdx], Serial.read());
             }
             else {
-              commandFailed = true;
               Serial.print("Command failed, no keg found with index ");
               Serial.println(meterIdx);
             }
           }
           else {
-            commandFailed = true;
             Serial.println("Command failed, option not found.");
           }
-          
           break;
-          
+        
+        case FILL_LOAD_WINDOW_CHAR: {
+          while (Serial.available() == 0);
+          float serialReadKg = Serial.parseFloat();
+          if (serialReadKg >= 0) {
+             for (int i = 0; i < NUM_KEGS; i++) {
+               kegLoadsInKg[i] = serialReadKg;
+             }
+             Serial.print("Keg load window now filled with value: ");
+             Serial.println(serialReadKg);
+          }
+          else {
+            Serial.println("Command failed, invalid kg value."); 
+          }
+          break;
+        }
         default:
-          commandFailed = true;
           Serial.println("No such command was found.");
           break;    
       }
     }
-    else {
-      commandFailed = true;
-      Serial.println("Commands must begin with '|'.");
-    }
-    
-    if (commandFailed) {
-      while (Serial.available() > 0 && Serial.peek() != '|') { Serial.read(); }
-    }
+
+    while (Serial.available() > 0 && Serial.peek() != '|') { Serial.read(); }
   }
 }
 
-void setKegType(KegLoadMeter& kegMeter, int kegType) {
+#define CORNY_KEG_CHAR 'c'
+#define SANKE_50L_KEG_CHAR 's'
+
+void setKegType(KegLoadMeter& kegMeter, char kegType) {
   switch (kegType) {
-    case 0:
+    
+    case CORNY_KEG_CHAR:
       kegMeter.setKegType(KegLoadMeter::Corny);
       printKegTypeSetMsg(kegMeter, "Corny");
       break;
-    case 1:
+      
+    case SANKE_50L_KEG_CHAR:
       kegMeter.setKegType(KegLoadMeter::Sanke50L);
       printKegTypeSetMsg(kegMeter, "Sanke 50L");
       break;
+      
     default:
       Serial.print("Command failed, keg type not found.");
       break;
