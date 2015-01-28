@@ -20,7 +20,6 @@ public:
   void doEmptyCalibration() { this->setState(EmptyCalibration); }
   void setKegType(KegType kegType);
 
-  void testTick(uint32_t frameDeltaMillis, float approxLoadInKg);
   void tick(uint32_t frameDeltaMillis, float approxLoadInKg);
 
   void setMeterPercentage(float percent, boolean drawEmptyLEDs = true);
@@ -42,6 +41,10 @@ private:
   uint8_t emptyAnimPulseCount;
   float calibratedEmptyLoadAmt;  // State: EmptyCalibration, Empty, JustBecameEmpty, Measuring
   
+  // The mimimum amount of average mass needed to push the meter into calibration from an empty state after
+  // a keg has already been emptied on the load sensor
+  float alreadyEmptiedMass;
+  
   float detectedKegMass;
   
   static const int LOAD_WINDOW_SIZE = 50; // Never make this bigger than 255!!
@@ -58,8 +61,7 @@ private:
     Calibrating,      // A keg (or something with mass) has been detected on the sensor and it needs to calibrate for it
     Calibrated,       // Calibration for the keg is complete, the keg is now considered "full"
     Measuring,        // This is the "typical" state for showing the current status of the keg as people drink from it 100%->0% on the meter
-    JustBecameEmpty,  // Happens when the meter hits ~0%
-    EmptyWithKeg,
+    JustBecameEmpty   // Happens when the meter hits ~0%
   } currState;
 
   void setState(State newState);
@@ -74,13 +76,13 @@ private:
   uint32_t getEmptyAnimationColour(uint8_t cycleIdx) const;
   uint32_t getCalibratingColour(float percentCalibrated) const;
   uint32_t getDiminishedWhite(float multiplier, uint8_t whiteAmt) const;
-  
+  uint32_t getDiminishedColour(float multiplier, uint8_t r, uint8_t g, uint8_t b) const;
   
   void fillLoadWindow(float value);
   void putInLoadWindow(float value);
   
   float getLoadWindowMean() const { return this->loadWindowSum / ((float)LOAD_WINDOW_SIZE); }
-  float getEmptyToFullMinMass() const;
+  float getEmptyToCalMinMass() const;
 };
 
 #endif

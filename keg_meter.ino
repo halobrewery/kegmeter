@@ -5,8 +5,6 @@
 #define NUM_KEGS 1
 #define NUM_LEDS (NUM_KEGS * KegLoadMeter::NUM_LEDS_PER_METER)
 
-
-
 // Parameter 1 = number of pixels in strip
 // Parameter 2 = Arduino pin number (most are valid)
 // Parameter 3 = pixel type flags, add together as needed:
@@ -25,8 +23,13 @@ Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUM_LEDS, OUTPUT_PIN, NEO_GRB + NEO_
 // each be updated with mass/weight data from sensors for that keg and will show
 // the appropriate animations/metering in a robust manor based on sensor calibration
 
+// NOTE: 10 Ohm resistor over the Rg of the amplifier makes for a decent resolution.
+// Each 1 integer increment in the incoming analog read value is approximately 1kg.
+// Values start around approx 12 -- this should be calibrated for though.
+
 KegLoadMeter kegMeters[] = { KegLoadMeter(0, strip) };
 float kegLoadsInKg[NUM_KEGS];
+int kegInputPins[] = { 0 };
 
 // Simulation defines
 #define DEFAULT_DELAY_TICK_MS 1
@@ -38,13 +41,10 @@ float kegLoadsInKg[NUM_KEGS];
 #define KEG_TYPE_CHANGE_CHAR 'T'
 #define FILL_LOAD_WINDOW_CHAR 'L'
 #define PKG_BEGIN_CHAR '|'
+//#define PKG_END_CHAR '~'
 
 void setup() {
   Serial.begin(9600);
-  
-  for (int i = 0; i < NUM_KEGS; i++) {
-    kegLoadsInKg[i] = 0; 
-  }
   
   strip.begin();
   strip.show(); // Initialize all pixels to 'off'
@@ -52,40 +52,41 @@ void setup() {
 
 //int count = 0;
 void loop() {
-  
   // Keg modes/calibration can be set via serial...
   readSerialCommands();
   
-  // Perform sensor readings...
-  // TODO
-  
-  
-  // Perform meter rendering...
-  for (int kegIdx = 0; kegIdx < NUM_KEGS; kegIdx++) {
+  // Perform sensor readings and meter updates...
+  for (uint8_t kegIdx = 0; kegIdx < NUM_KEGS; kegIdx++) {
     
-    //kegMeters[kegIdx].testTick(DEFAULT_DELAY_TICK_MS, 1);
+    // Sensor readings...
+    getLoadSensorReading(kegIdx, &kegLoadsInKg[kegIdx]);
+    
+    // Meter update...
     kegMeters[kegIdx].tick(DEFAULT_DELAY_TICK_MS, kegLoadsInKg[kegIdx]);
   }
-  
-  //kegMeters[0].setMeterPercentage(((float)i)/(float)(strip.numPixels()));
-  //count++;
-
-  //kegMeters[0].showEmptyAnimation(60, 4);
-  //kegMeters[0].showCalibratingAnimation(5, 1.0, true);
-  //kegMeters[0].showCalibratedAnimation(25);
   
   // All delays and redraw (i.e., "show") of the strip is done at the end of a frame
   strip.show();
   delay(DEFAULT_DELAY_TICK_MS);
+  
+   //getLoadSensorReading(0, &kegLoadsInKg[0]);
+   //Serial.println(kegLoadsInKg[0]);
+}
+
+/**
+ * Get incoming data from the load sensor for the given keg and populate the given mass value.
+ */
+void getLoadSensorReading(uint8_t kegIdx, float* loadValueInKg) {
+  *loadValueInKg = analogRead(kegInputPins[kegIdx]);
 }
 
 // Checks for available serial data -- this can guide certain operations for the meters, including
 // calibration of the load sensors when no keg is placed on them ("empty calibration")
-// Empty calibration message (all meters): '|Ea'
-// Empty calibration message (specific meter): '|Emx', where 'x' is the zero-based index of the meter
-// Keg type message (all meters): '|Tay', where 'y' is the type: 'c' for corny keg, and 's' for 50L sankey keg
-// Keg type message (specific meter): '|Tmxy', where 'x' is the zero-based index of the meter, and 'y' is the type
-// Set the loads for all kegs '|Lx', where 'x' is the floating point value to fill the load window with in kg
+// Empty calibration message (all meters): '|Ea~'
+// Empty calibration message (specific meter): '|Emx~', where 'x' is the zero-based index of the meter
+// Keg type message (all meters): '|Tay~', where 'y' is the type: 'c' for corny keg, and 's' for 50L sankey keg
+// Keg type message (specific meter): '|Tmxy~', where 'x' is the zero-based index of the meter, and 'y' is the type
+// Set the loads for all kegs '|Lx~', where 'x' is the floating point value to fill the load window with in kg
 void readSerialCommands() {
 
   if (Serial.available() >= 3) {
@@ -101,7 +102,7 @@ void readSerialCommands() {
           serialReadByte = Serial.read();
           if (serialReadByte == ALL_METERS_CHAR) {
             // Empty calibration for all meters
-            Serial.println("Performing Empty Calibration on all kegs...");
+            Serial.println("Performing Empty Calibration on all meters...");
             for (int i = 0; i < NUM_KEGS; i++) {
               kegMeters[i].doEmptyCalibration();
             }
@@ -111,7 +112,7 @@ void readSerialCommands() {
             
             // There should be another part of the message, wait for it
             while (Serial.available() == 0);
-            
+
             // Get the meter index to calibrate for...
             int meterIdx = Serial.parseInt();
             if (meterIdx < NUM_KEGS && meterIdx >= 0) {
@@ -135,6 +136,7 @@ void readSerialCommands() {
           if (serialReadByte == ALL_METERS_CHAR) {
             // There should be another part of the message, wait for it
             while (Serial.available() == 0);
+         
             int kegType = Serial.parseInt();
             for (int i = 0; i < NUM_KEGS; i++) {
               setKegType(kegMeters[i], kegType);
