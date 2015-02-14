@@ -31,6 +31,31 @@ KegLoadMeter kegMeters[] = { KegLoadMeter(0, strip) };
 float kegLoadsInKg[NUM_KEGS];
 int kegInputPins[] = { 0 };
 
+float mapfloat(float x, float in_min, float in_max, float out_min, float out_max) {
+  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
+
+
+// You need two loads of well know weight. In this example A = 10 kg. B = 30 kg
+// Put on load A 
+// read the analog value showing (this is analogvalA)
+// put on load B
+// read the analog value B
+
+// Enter you own analog values here
+float loadA = 5.14; // kg
+int analogvalA = 160.5; // analog reading taken with load A on the load cell
+float loadB = 0.9; // kg 
+int analogvalB = 141.5; // analog reading taken with load B on the load cell
+
+float analogToLoad(float analogval){
+
+  // using a custom map-function, because the standard arduino map function only uses int
+  float load = max(0, mapfloat(analogval, analogvalA, analogvalB, loadA, loadB));
+  return load;
+}
+
+
 // Simulation defines
 #define DEFAULT_DELAY_TICK_MS 1
 
@@ -68,16 +93,17 @@ void loop() {
   // All delays and redraw (i.e., "show") of the strip is done at the end of a frame
   strip.show();
   delay(DEFAULT_DELAY_TICK_MS);
-  
-   //getLoadSensorReading(0, &kegLoadsInKg[0]);
-   //Serial.println(kegLoadsInKg[0]);
 }
 
 /**
  * Get incoming data from the load sensor for the given keg and populate the given mass value.
  */
 void getLoadSensorReading(uint8_t kegIdx, float* loadValueInKg) {
-  *loadValueInKg = analogRead(kegInputPins[kegIdx]);
+  
+  int analogValue = analogRead(kegInputPins[kegIdx]);
+  
+  // Perform a running average to smooth the readings a little bit
+  *loadValueInKg  = 0.99 * (*loadValueInKg) + 0.01 * analogToLoad(analogValue);
 }
 
 // Checks for available serial data -- this can guide certain operations for the meters, including

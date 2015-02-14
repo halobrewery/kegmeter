@@ -34,17 +34,14 @@ private:
   const uint16_t startLEDIdx;
   
   // Stateful members: keep track of information in various states
+  uint16_t dataCounter;
   uint32_t delayCounterMillis;   // Used across all states for tracking the total delay in ms
   uint8_t calibratingAnimLEDIdx; // State: Calibrating
   uint16_t calibratedAnimLEDIdx; // State: Calibrated
   float calibratedFullLoadAmt;   // State: Calibrated, Measuring
+  float lastPercentAmt;
   uint8_t emptyAnimPulseCount;
   float calibratedEmptyLoadAmt;  // State: EmptyCalibration, Empty, JustBecameEmpty, Measuring
-  
-  // The mimimum amount of average mass needed to push the meter into calibration from an empty state after
-  // a keg has already been emptied on the load sensor
-  float alreadyEmptiedMass;
-  
   float detectedKegMass;
   
   static const int LOAD_WINDOW_SIZE = 50; // Never make this bigger than 255!!
