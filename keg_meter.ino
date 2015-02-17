@@ -1,7 +1,9 @@
 #include <Adafruit_NeoPixel.h>
 #include "keg_load_meter.h"
 
-#define OUTPUT_PIN 6
+#define LED_OUTPUT_PIN 6
+#define EMPTY_CAL_BUTTON_INPUT_PIN 2
+
 #define NUM_KEGS 1
 #define NUM_LEDS (NUM_KEGS * KegLoadMeter::NUM_LEDS_PER_METER)
 
@@ -12,7 +14,7 @@
 //   NEO_KHZ400  400 KHz (classic 'v1' (not v2) FLORA pixels, WS2811 drivers)
 //   NEO_GRB     Pixels are wired for GRB bitstream (most NeoPixel products)
 //   NEO_RGB     Pixels are wired for RGB bitstream (v1 FLORA pixels, not v2)
-Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUM_LEDS, OUTPUT_PIN, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUM_LEDS, LED_OUTPUT_PIN, NEO_GRB + NEO_KHZ800);
 
 // IMPORTANT: To reduce NeoPixel burnout risk, add 1000 uF capacitor across
 // pixel power leads, add 300 - 500 Ohm resistor on first pixel's data input
@@ -36,23 +38,15 @@ float mapfloat(float x, float in_min, float in_max, float out_min, float out_max
 }
 
 
-// You need two loads of well know weight. In this example A = 10 kg. B = 30 kg
-// Put on load A 
-// read the analog value showing (this is analogvalA)
-// put on load B
-// read the analog value B
+// Enter your calibrated values here
+float loadA = 4.313; // kg
+int analogvalA = 168.5; // analog reading taken with load A on the load cells
+float loadB = 5.079; // kg 
+int analogvalB = 170.4; // analog reading taken with load B on the load cells
 
-// Enter you own analog values here
-float loadA = 5.14; // kg
-int analogvalA = 160.5; // analog reading taken with load A on the load cell
-float loadB = 0.9; // kg 
-int analogvalB = 141.5; // analog reading taken with load B on the load cell
-
-float analogToLoad(float analogval){
-
-  // using a custom map-function, because the standard arduino map function only uses int
-  float load = max(0, mapfloat(analogval, analogvalA, analogvalB, loadA, loadB));
-  return load;
+float analogToLoad(float analogVal){
+  return max(0, mapfloat(analogVal, analogvalA, analogvalB, loadA, loadB));
+  //return analogVal;
 }
 
 
@@ -68,8 +62,11 @@ float analogToLoad(float analogval){
 #define PKG_BEGIN_CHAR '|'
 //#define PKG_END_CHAR '~'
 
+
 void setup() {
   Serial.begin(9600);
+  
+  pinMode(EMPTY_CAL_BUTTON_INPUT_PIN, INPUT);
   
   strip.begin();
   strip.show(); // Initialize all pixels to 'off'
@@ -79,6 +76,10 @@ void setup() {
 void loop() {
   // Keg modes/calibration can be set via serial...
   readSerialCommands();
+  
+  if (digitalRead(EMPTY_CAL_BUTTON_INPUT_PIN) >= 1) {
+    doEmptyCalibrationToAllKegs();
+  }
   
   // Perform sensor readings and meter updates...
   for (uint8_t kegIdx = 0; kegIdx < NUM_KEGS; kegIdx++) {
@@ -106,6 +107,13 @@ void getLoadSensorReading(uint8_t kegIdx, float* loadValueInKg) {
   *loadValueInKg  = 0.99 * (*loadValueInKg) + 0.01 * analogToLoad(analogValue);
 }
 
+void doEmptyCalibrationToAllKegs() {
+  Serial.println("Performing Empty Calibration on all meters...");
+  for (int i = 0; i < NUM_KEGS; i++) {
+    kegMeters[i].doEmptyCalibration();
+  }
+}
+
 // Checks for available serial data -- this can guide certain operations for the meters, including
 // calibration of the load sensors when no keg is placed on them ("empty calibration")
 // Empty calibration message (all meters): '|Ea~'
@@ -128,10 +136,7 @@ void readSerialCommands() {
           serialReadByte = Serial.read();
           if (serialReadByte == ALL_METERS_CHAR) {
             // Empty calibration for all meters
-            Serial.println("Performing Empty Calibration on all meters...");
-            for (int i = 0; i < NUM_KEGS; i++) {
-              kegMeters[i].doEmptyCalibration();
-            }
+            doEmptyCalibrationToAllKegs();
           }
           else if (serialReadByte == METER_SELECT_CHAR) {
             // Empty calibration for a specific meter...

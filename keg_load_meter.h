@@ -42,9 +42,9 @@ private:
   float lastPercentAmt;
   uint8_t emptyAnimPulseCount;
   float calibratedEmptyLoadAmt;  // State: EmptyCalibration, Empty, JustBecameEmpty, Measuring
-  float detectedKegMass;
+  float detectedEmptyKegMass;
   
-  static const int LOAD_WINDOW_SIZE = 50; // Never make this bigger than 255!!
+  static const int LOAD_WINDOW_SIZE = 100; // Never make this bigger than 255!!
   uint8_t loadWindowIdx;
   float loadWindow[LOAD_WINDOW_SIZE];
   float loadWindowSum;

@@ -1,4 +1,5 @@
 #include "keg_load_meter.h"
+#include "keg_meter_protocol.h"
 #include "assert.h"
 
 #define _DEBUG
@@ -22,41 +23,45 @@ const uint8_t KegLoadMeter::BASE_CALIBRATING_BRIGHTNESS = 35;
 
 #define MIN_EMPTY_CAL_TIME_MS 3000
 
-#define AVG_EMPTY_CORNY_KEG_MASS_KG 3.9
+#define AVG_EMPTY_CORNY_KEG_MASS_KG 4.4
 #define AVG_EMPTY_50L_KEG_MASS_KG   13.5
 
 #define MAX_FULL_CORNEY_KEG_MASS_KG (AVG_EMPTY_CORNY_KEG_MASS_KG + 21)
 
-#define MINIMUM_VARIANCE_TO_FINISH_CALIBRATING (0.05)
-#define MIN_TRUSTWORTHY_VARIANCE_WHILE_MEASURING (0.05)
+#define MINIMUM_VARIANCE_TO_FINISH_CALIBRATING (0.005)
+#define MIN_TRUSTWORTHY_VARIANCE_WHILE_MEASURING (0.005)
 #define LERP(x, x0, x1, y0, y1) (y0 + (y1-y0)*(x-x0)/(x1-x0)) //(static_cast<float>(y0) + (static_cast<float>(y1)-static_cast<float>(y0)) * (static_cast<float>(x)-static_cast<float>(x0)) / (static_cast<float>(x1)-static_cast<float>(x0)))
 
 // This needs to be a bit lighter than the lightest empty keg in use
-#define EMPTY_TO_CALIBRATING_MASS (AVG_EMPTY_CORNY_KEG_MASS_KG-0.5)
+#define EMPTY_TO_CALIBRATING_MASS (AVG_EMPTY_CORNY_KEG_MASS_KG + 5)
 
 #define CALIBRATE_ANIM_DELAY_MS 5
 #define EMPTY_ANIM_PULSE_MS 100
 #define NUM_EMPTY_PULSES 5
 
+//#define EEPROM_NUM_ADDRS 5
+//#define EEPROM_CAL_EMPTY_AMT_ADDR  (this->meterIdx * EEPROM_NUM_ADDRS + 0);
+//#define EEPROM_CAL_FULL_AMT_ADDR   (this->meterIdx * EEPROM_NUM_ADDRS + 1);
+//#define EEPROM_EMPTY_KEG_MASS_ADDR (this->meterIdx * EEPROM_NUM_ADDRS + 2);
+
 KegLoadMeter::KegLoadMeter(uint8_t meterIdx, Adafruit_NeoPixel& strip) : 
   meterIdx(meterIdx), startLEDIdx(meterIdx*NUM_LEDS_PER_METER), loadWindowIdx(0), 
   calibratingAnimLEDIdx(0), calibratedAnimLEDIdx(0), currState(Empty), strip(strip), 
-  calibratedEmptyLoadAmt(-1), delayCounterMillis(0), 
-  dataCounter(0), detectedKegMass(AVG_EMPTY_CORNY_KEG_MASS_KG) {
+  calibratedEmptyLoadAmt(0), delayCounterMillis(0), 
+  dataCounter(0), detectedEmptyKegMass(AVG_EMPTY_CORNY_KEG_MASS_KG) {
   
   // Fill the load window with empty data
   this->fillLoadWindow(0.0);
-  
 }
 
 void KegLoadMeter::setKegType(KegType kegType) {
   switch (kegType) {
     case Corny:
-      this->detectedKegMass = AVG_EMPTY_CORNY_KEG_MASS_KG;
+      this->detectedEmptyKegMass = AVG_EMPTY_CORNY_KEG_MASS_KG;
       break;
       
     case Sanke50L:
-      this->detectedKegMass = AVG_EMPTY_50L_KEG_MASS_KG;
+      this->detectedEmptyKegMass = AVG_EMPTY_50L_KEG_MASS_KG;
       break;
       
     default:
@@ -77,6 +82,7 @@ void KegLoadMeter::tick(uint32_t frameDeltaMillis, float approxLoadInKg) {
       // We fill the load window and find the average "empty" value
       if (this->delayCounterMillis >= MIN_EMPTY_CAL_TIME_MS && this->dataCounter >= LOAD_WINDOW_SIZE) {
         this->calibratedEmptyLoadAmt = this->getLoadWindowMean();
+        Serial.println("Empty Calibration Complete.");
         DEBUG_WITH_STR_INT("Calibrated Empty Amount: ", this->calibratedEmptyLoadAmt);
         this->setState(Empty);
       }
@@ -88,19 +94,24 @@ void KegLoadMeter::tick(uint32_t frameDeltaMillis, float approxLoadInKg) {
       // LEDs are all turned off
       this->turnOff();
 
-#ifdef _DEBUG
       static int COUNTER = 0;
       if (COUNTER % 1000 == 0) {
+        
+        KegMeterProtocol::OutputEmptyMsg();
+        
+        #ifdef _DEBUG
         DEBUG_WITH_STR_INT("Current load window mean: ", this->getLoadWindowMean());
         DEBUG_WITH_STR_INT("Current load value: ", approxLoadInKg);
         DEBUG_WITH_STR_INT("Empty to calibrating minimum mass: ", this->getEmptyToCalMinMass());
+        #endif
+        
+        COUNTER = 0;
       }
       COUNTER++;
-#endif
+
       
       // Waiting until someone puts a new full/partially-full keg on the sensor...
-      if (this->loadWindowVariance <= MINIMUM_VARIANCE_TO_FINISH_CALIBRATING &&
-          this->calibratedEmptyLoadAmt >= 0 && this->getLoadWindowMean() >= this->getEmptyToCalMinMass()) {
+      if (this->loadWindowVariance <= MINIMUM_VARIANCE_TO_FINISH_CALIBRATING && this->getLoadWindowMean() >= this->getEmptyToCalMinMass()) {
             
         this->setState(Calibrating);
       }
@@ -128,7 +139,7 @@ void KegLoadMeter::tick(uint32_t frameDeltaMillis, float approxLoadInKg) {
         float percentCalibrated = max(0.0, min(1.0, LERP(this->loadWindowVariance, MINIMUM_VARIANCE_TO_FINISH_CALIBRATING, 300, 1.0, 0.0)));
         this->showCalibratingAnimation(CALIBRATE_ANIM_DELAY_MS, percentCalibrated, true);
         
-        if (percentCalibrated >= 1.0 && this->dataCounter >= LOAD_WINDOW_SIZE) {
+        if (percentCalibrated >= 1.0 && this->dataCounter >= 10*LOAD_WINDOW_SIZE) {
           this->setState(Calibrated); 
         }
       }
@@ -144,38 +155,47 @@ void KegLoadMeter::tick(uint32_t frameDeltaMillis, float approxLoadInKg) {
         if (this->showCalibratedAnimation(CALIBRATE_ANIM_DELAY_MS)) {
           // Finished with the animation, on to keeping tabs on the measurement
           this->lastPercentAmt = 1.0;
+          KegMeterProtocol::OutputMeasuredPercentMsg(1.0);
           this->setState(Measuring); 
         }
       }
       break;
       
     case Measuring: {
-      // We need to be mindful of the empty keg mass -- even when the keg has nothing in it, it will still weigh something!
-      #ifdef _DEBUG
-      static int COUNTER = 0;
-      if (COUNTER % 100 == 0) {
-        DEBUG_WITH_STR_INT("Empty window value: ", this->calibratedEmptyLoadAmt);
-        DEBUG_WITH_STR_INT("Current load window mean: ", this->getLoadWindowMean());
-        DEBUG_WITH_STR_INT("Current load window variance: ", this->loadWindowVariance);
-        DEBUG_WITH_STR_INT("Current load value: ", approxLoadInKg);
-      }
-      COUNTER++;
-      #endif
-      
+ 
       float currPercentAmt = this->lastPercentAmt;
       if (this->loadWindowVariance <= MIN_TRUSTWORTHY_VARIANCE_WHILE_MEASURING) {
         // The meter is being set by the current load amount based on a linear interpolation between
         // the initial calibrated full load and a reasonable "zero" load
-        currPercentAmt = max(0.0, min(1.0, LERP(this->getLoadWindowMean(), this->calibratedEmptyLoadAmt, this->calibratedFullLoadAmt, 0.0, 1.0)));
+        currPercentAmt = max(0.0, min(1.0, LERP(this->getLoadWindowMean(), (this->calibratedEmptyLoadAmt + this->detectedEmptyKegMass), this->calibratedFullLoadAmt, 0.0, 1.0)));
+        
+        // Running average to make sure we don't overreact to small changes in the mass
         currPercentAmt = 0.99*this->lastPercentAmt + 0.01*currPercentAmt;
         if (currPercentAmt > this->lastPercentAmt) {
           currPercentAmt = this->lastPercentAmt;
         }
+
         this->lastPercentAmt = currPercentAmt;
       }
       
+      static int COUNTER = 0;
+      if (COUNTER % 1000 == 0) {
+        
+        KegMeterProtocol::OutputMeasuredPercentMsg(currPercentAmt);
+        
+        #ifdef _DEBUG
+        DEBUG_WITH_STR_INT("Empty window value: ", this->calibratedEmptyLoadAmt);
+        DEBUG_WITH_STR_INT("Current load window mean: ", this->getLoadWindowMean());
+        DEBUG_WITH_STR_INT("Current load window variance: ", this->loadWindowVariance);
+        DEBUG_WITH_STR_INT("Current load value: ", approxLoadInKg);
+        #endif
+        
+        COUNTER = 0;
+      }
+      COUNTER++;
+      
       this->setMeterPercentage(currPercentAmt);
-      if (currPercentAmt < 0.01) {
+      if (currPercentAmt < 0.011) {
         this->lastPercentAmt = 0.0;
         this->setState(JustBecameEmpty); 
       }
@@ -206,17 +226,17 @@ void KegLoadMeter::setState(State newState) {
     case EmptyCalibration:
       this->dataCounter = 0;
       this->delayCounterMillis = 0;
-      DEBUG_STR("Entering Empty Calibration State");
+      Serial.println("Entering Empty Calibration State");
       break;
       
     case Empty:
-      DEBUG_STR("Entering Empty State");
+      Serial.println("Entering Empty State");
       this->dataCounter = 0;
       this->turnOff();
       break;
       
     case Calibrating:
-      DEBUG_STR("Entering Calibrating State");
+      Serial.println("Entering Calibrating State");
       this->dataCounter = 0;
       
       // In this state we will be playing the calibration animation
@@ -224,7 +244,7 @@ void KegLoadMeter::setState(State newState) {
       break;
       
     case Calibrated:
-      DEBUG_STR("Entering Calibrated State");
+      Serial.println("Entering Calibrated State");
       this->dataCounter = 0;
       this->calibratedAnimLEDIdx  = 0;
       this->calibratedFullLoadAmt = this->getLoadWindowMean();
@@ -232,21 +252,21 @@ void KegLoadMeter::setState(State newState) {
       
       // Based on the full load amount we can get a pretty good guess at the type of keg
       if (this->calibratedFullLoadAmt > MAX_FULL_CORNEY_KEG_MASS_KG) {
-        this->detectedKegMass = AVG_EMPTY_50L_KEG_MASS_KG;
+        this->detectedEmptyKegMass = AVG_EMPTY_50L_KEG_MASS_KG;
       }
-      else if (this->calibratedFullLoadAmt <= AVG_EMPTY_50L_KEG_MASS_KG) {
-        this->detectedKegMass = AVG_EMPTY_CORNY_KEG_MASS_KG;
+      else {
+        this->detectedEmptyKegMass = AVG_EMPTY_CORNY_KEG_MASS_KG;
       }
       
       break;
       
     case Measuring:
-      DEBUG_STR("Entering Measuring State");
+      Serial.println("Entering Measuring State");
       this->dataCounter = 0;
       break;
       
     case JustBecameEmpty:
-      DEBUG_STR("Entering Just Became Empty State");
+      Serial.println("Entering Just Became Empty State");
       this->dataCounter = 0;
       this->emptyAnimPulseCount = 0;
       break;
