@@ -7,14 +7,33 @@
 
 class KegMeterProtocol {
 public:
-  static void OutputMeasuredPercentMsg(float percent) { OutputKegNumberStr(); Serial.print("{M,"); Serial.print(percent); Serial.println("}"); }
-  static void OutputEmptyMsg() { OutputKegNumberStr(); Serial.println("{E}"); }
+  static void OutputMeasuredPercentMsg(uint8_t meterIdx, float percent) { 
+    OutputStartPkg();
+    OutputKegNumberStr(meterIdx);
+    Serial.print("{P:"); Serial.print(percent); Serial.print("}"); 
+    OutputEndPkg();
+  }
+
+  static void OutputStatusMsg(uint8_t meterIdx, float fullMass, float emptyMass, float percent, float load, float variance) {
+    OutputStartPkg();
+    OutputKegNumberStr(meterIdx);
+    Serial.print("{P:"); Serial.print(percent); 
+    Serial.print(",F:"); Serial.print(fullMass);
+    Serial.print(",E:"); Serial.print(emptyMass);
+    Serial.print(",L:"); Serial.print(load);
+    Serial.print(",V:"); Serial.print(variance);
+    Serial.print("}");
+    OutputEndPkg();
+  }
   
 private:
   KegMeterProtocol() {}
   ~KegMeterProtocol() {}
   
-  static void OutputKegNumberStr() { Serial.print("["); Serial.print(KEG_NUMBER); Serial.print("]"); } 
+  static void OutputKegNumberStr(uint8_t meterId) { Serial.print(meterId); } 
+  static void OutputStartPkg() { Serial.print("[<<<"); }
+  static void OutputEndPkg() { Serial.println("]"); }
+  
 };
 
 #endif // KEG_METER_PROTOCOL_H_

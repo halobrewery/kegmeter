@@ -1,7 +1,7 @@
 #include <Adafruit_NeoPixel.h>
 #include "keg_load_meter.h"
 
-#define LED_OUTPUT_PIN 6
+#define LED_OUTPUT_PIN 5
 #define EMPTY_CAL_BUTTON_INPUT_PIN 2
 
 #define NUM_KEGS 1
@@ -58,13 +58,13 @@ float analogToLoad(float analogVal){
 #define ALL_METERS_CHAR 'a'
 #define EMPTY_CALIBRATE_MODE_CHAR 'E'
 #define KEG_TYPE_CHANGE_CHAR 'T'
-#define FILL_LOAD_WINDOW_CHAR 'L'
+#define QUERY_METER_CHAR 'Q'
 #define PKG_BEGIN_CHAR '|'
 //#define PKG_END_CHAR '~'
 
 
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
   
   pinMode(EMPTY_CAL_BUTTON_INPUT_PIN, INPUT);
   
@@ -120,7 +120,8 @@ void doEmptyCalibrationToAllKegs() {
 // Empty calibration message (specific meter): '|Emx~', where 'x' is the zero-based index of the meter
 // Keg type message (all meters): '|Tay~', where 'y' is the type: 'c' for corny keg, and 's' for 50L sankey keg
 // Keg type message (specific meter): '|Tmxy~', where 'x' is the zero-based index of the meter, and 'y' is the type
-// Set the loads for all kegs '|Lx~', where 'x' is the floating point value to fill the load window with in kg
+// Query all meters '|Qa~', this will cause all meters to output their status to serial
+// Query a given meter '|Qmx~', where 'x' is the zero-based index of the meter, this will cause serial to be output with that meter's status
 void readSerialCommands() {
 
   if (Serial.available() >= 3) {
@@ -133,6 +134,7 @@ void readSerialCommands() {
       switch (serialReadByte) {
         
         case EMPTY_CALIBRATE_MODE_CHAR:
+          while (Serial.available() == 0);
           serialReadByte = Serial.read();
           if (serialReadByte == ALL_METERS_CHAR) {
             // Empty calibration for all meters
@@ -163,6 +165,7 @@ void readSerialCommands() {
           break;
           
         case KEG_TYPE_CHANGE_CHAR:
+          while (Serial.available() == 0);
           serialReadByte = Serial.read();
           if (serialReadByte == ALL_METERS_CHAR) {
             // There should be another part of the message, wait for it
@@ -194,21 +197,30 @@ void readSerialCommands() {
           }
           break;
         
-        case FILL_LOAD_WINDOW_CHAR: {
+        
+        case QUERY_METER_CHAR: {
           while (Serial.available() == 0);
-          float serialReadKg = Serial.parseFloat();
-          if (serialReadKg >= 0) {
-             for (int i = 0; i < NUM_KEGS; i++) {
-               kegLoadsInKg[i] = serialReadKg;
-             }
-             Serial.print("Keg load window now filled with value: ");
-             Serial.println(serialReadKg);
+          serialReadByte = Serial.read();
+          if (serialReadByte == ALL_METERS_CHAR) {
+            for (int i = 0; i < NUM_KEGS; i++) {
+               kegMeters[i].outputStatusToSerial();
+            }
+          }
+          else if (serialReadByte == METER_SELECT_CHAR) {
+            uint8_t meterIdx = Serial.read();
+            if (meterIdx < NUM_KEGS) {
+              kegMeters[meterIdx].outputStatusToSerial();
+            }
+            else {
+              Serial.println("Command failed, invalid meter index.");
+            }       
           }
           else {
-            Serial.println("Command failed, invalid kg value."); 
+            Serial.println("Command failed, option not found.");
           }
-          break;
+          break; 
         }
+        
         default:
           Serial.println("No such command was found.");
           break;    

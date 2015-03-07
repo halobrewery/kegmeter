@@ -16,6 +16,7 @@ public:
   ~KegLoadMeter() {}
 
   uint8_t getIndex() const { return this->meterIdx; }
+  uint8_t getId() const { return this->meterIdx+1; }
 
   void doEmptyCalibration() { this->setState(EmptyCalibration); }
   void setKegType(KegType kegType);
@@ -28,6 +29,8 @@ public:
   boolean showCalibratedAnimation(uint8_t delayMillis);
   
   void turnOff();
+
+  void outputStatusToSerial() const;
   
 private:
   const uint8_t meterIdx;          // The zero-based index of this meter in the LED strip
