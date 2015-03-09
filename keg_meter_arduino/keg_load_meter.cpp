@@ -72,6 +72,21 @@ void KegLoadMeter::setKegType(KegType kegType) {
   }
 }
 
+void KegLoadMeter::setStateValues(float percent, float fullAmt, float emptyAmt) {
+  // Fill the window with the value...
+  float currMass = fullAmt * percent;
+  for (int i = 0; i < LOAD_WINDOW_SIZE; i++) {
+    this->loadWindow[i] = currMass;
+  }
+  this->loadWindowSum = currMass * LOAD_WINDOW_SIZE;
+  this->loadWindowVariance = 0;
+  
+  this->setState(Measuring);
+  this->lastPercentAmt = percent;
+  this->calibratedFullLoadAmt  = fullAmt;
+  this->calibratedEmptyLoadAmt = emptyAmt;
+}
+
 void KegLoadMeter::tick(uint32_t frameDeltaMillis, float approxLoadInKg) {
   this->putInLoadWindow(approxLoadInKg);
   
@@ -110,7 +125,9 @@ void KegLoadMeter::tick(uint32_t frameDeltaMillis, float approxLoadInKg) {
       #endif
 
       // Waiting until someone puts a new full/partially-full keg on the sensor...
-      if (abs(this->loadWindowVariance) <= MINIMUM_VARIANCE_TO_FINISH_CALIBRATING && this->getLoadWindowMean() >= this->getEmptyToCalMinMass()) {
+      if (abs(this->loadWindowVariance) <= MINIMUM_VARIANCE_TO_FINISH_CALIBRATING && 
+          this->getLoadWindowMean() >= this->getEmptyToCalMinMass()) {
+            
         this->setState(Calibrating);
       }
       break;
@@ -154,7 +171,6 @@ void KegLoadMeter::tick(uint32_t frameDeltaMillis, float approxLoadInKg) {
         if (this->showCalibratedAnimation(CALIBRATE_ANIM_DELAY_MS)) {
           // Finished with the animation, on to keeping tabs on the measurement
           this->lastPercentAmt = 1.0;
-          KegMeterProtocol::OutputMeasuredPercentMsg(this->getIndex(), 1.0);
           this->setState(Measuring); 
         }
       }
@@ -163,7 +179,9 @@ void KegLoadMeter::tick(uint32_t frameDeltaMillis, float approxLoadInKg) {
     case Measuring: {
  
       float currPercentAmt = this->lastPercentAmt;
-      float tempPercentAmt =  max(0.0, min(1.0, LERP(this->getLoadWindowMean(), (this->calibratedEmptyLoadAmt + this->detectedEmptyKegMass), this->calibratedFullLoadAmt, 0.0, 1.0)));
+      float tempPercentAmt =  max(0.0, min(1.0, LERP(this->getLoadWindowMean(),
+        (this->calibratedEmptyLoadAmt + this->detectedEmptyKegMass), this->calibratedFullLoadAmt, 0.0, 1.0)));
+        
       if (abs(this->loadWindowVariance) <= MIN_TRUSTWORTHY_VARIANCE_WHILE_MEASURING || (currPercentAmt-tempPercentAmt) <= 0.001) {
         // The meter is being set by the current load amount based on a linear interpolation between
         // the initial calibrated full load and a reasonable "zero" load
@@ -214,7 +232,7 @@ void KegLoadMeter::tick(uint32_t frameDeltaMillis, float approxLoadInKg) {
   }
   
   static int OUTPUT_COUNTER = 0;
-  if (OUTPUT_COUNTER % 500 == 0) {
+  if (OUTPUT_COUNTER % 1000 == 0) {
     this->outputStatusToSerial();
     OUTPUT_COUNTER = 0;
   }

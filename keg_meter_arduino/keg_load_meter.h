@@ -20,10 +20,10 @@ public:
 
   void doEmptyCalibration() { this->setState(EmptyCalibration); }
   void setKegType(KegType kegType);
+  void setStateValues(float percent, float fullAmt, float emptyAmt);
 
   void tick(uint32_t frameDeltaMillis, float approxLoadInKg);
-
-  void setMeterPercentage(float percent, boolean drawEmptyLEDs = true);
+  
   boolean showEmptyAnimation(uint8_t pulseTimeInMillis, uint8_t numPulses);
   void showCalibratingAnimation(uint8_t delayMillis, float percentCalibrated, boolean resetDelayCounter = false);
   boolean showCalibratedAnimation(uint8_t delayMillis);
@@ -70,6 +70,8 @@ private:
   static const uint8_t DEAD_BRIGHTNESS;
   static const uint8_t DEATH_PULSE_BRIGHTNESS;
   static const uint8_t BASE_CALIBRATING_BRIGHTNESS;
+  
+  void setMeterPercentage(float percent, boolean drawEmptyLEDs = true);
   
   uint32_t getFullColour() const { return this->strip.Color(ALIVE_BRIGHTNESS, ALIVE_BRIGHTNESS, ALIVE_BRIGHTNESS); }
   uint32_t getEmptyColour() const { return this->strip.Color(DEAD_BRIGHTNESS, DEAD_BRIGHTNESS, DEAD_BRIGHTNESS); }

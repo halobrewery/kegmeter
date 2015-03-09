@@ -17,11 +17,11 @@ public:
   static void OutputStatusMsg(uint8_t meterIdx, float fullMass, float emptyMass, float percent, float load, float variance) {
     OutputStartPkg();
     OutputKegNumberStr(meterIdx);
-    Serial.print("{P:"); Serial.print(percent); 
-    Serial.print(",F:"); Serial.print(fullMass);
-    Serial.print(",E:"); Serial.print(emptyMass);
-    Serial.print(",L:"); Serial.print(load);
-    Serial.print(",V:"); Serial.print(variance);
+    Serial.print("{P:"); Serial.print(percent, 2); 
+    Serial.print(",F:"); Serial.print(fullMass, 2);
+    Serial.print(",E:"); Serial.print(emptyMass, 2);
+    Serial.print(",L:"); Serial.print(load, 2);
+    Serial.print(",V:"); Serial.print(variance, 5);
     Serial.print("}");
     OutputEndPkg();
   }

@@ -29,14 +29,8 @@
      <string>Serial</string>
     </property>
     <addaction name="serialInfoAction"/>
+    <addaction name="serialSearchAndConnectAction"/>
    </widget>
-   <widget class="QMenu" name="menuPreferences">
-    <property name="title">
-     <string>File</string>
-    </property>
-    <addaction name="preferencesAction"/>
-   </widget>
-   <addaction name="menuPreferences"/>
    <addaction name="menuSerial"/>
   </widget>
   <widget class="QDockWidget" name="logDockWidget">
@@ -101,6 +95,11 @@
   <action name="preferencesAction">
    <property name="text">
     <string>Preferences</string>
+   </property>
+  </action>
+  <action name="serialSearchAndConnectAction">
+   <property name="text">
+    <string>Search and Connect...</string>
    </property>
   </action>
  </widget>

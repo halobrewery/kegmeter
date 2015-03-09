@@ -4,11 +4,11 @@
 #include <QWidget>
 #include <QTimer>
 
+#include "kegmeterdata.h"
+
 namespace Ui {
 class KegMeter;
 }
-
-class KegMeterData;
 
 class KegMeter : public QWidget {
     Q_OBJECT
@@ -20,6 +20,7 @@ public:
     int getIndex() const { return this->id-1; }
 
     void setData(const KegMeterData& data);
+    const KegMeterData& getData() const { return this->currData; }
 
 signals:
     void doEmptyCalibration(const KegMeter& kegMeter);
@@ -31,6 +32,7 @@ private slots:
 private:
     Ui::KegMeter* ui;
     int id;
+    KegMeterData currData;
 
     static const int DATA_TIMEOUT_MS = 10000;
     QTimer timer;

@@ -3,7 +3,7 @@
 
 #include "kegmeter.h"
 #include "kegmeterdata.h"
-#include "preferencesdialog.h"
+#include "serialsearchandconnectdialog.h"
 
 #include <cassert>
 #include <cmath>
@@ -16,6 +16,10 @@
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QTextStream>
+#include <QSettings>
+#include <QMessageBox>
+
+const char* MainWindow::KEG_DATA_KEY = "keg_meter_data";
 
 MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent),
@@ -50,10 +54,15 @@ MainWindow::MainWindow(QWidget *parent) :
     this->ui->centralWidget->setLayout(mainLayout);
     this->setWindowTitle("Halo Keg Meter Control Panel");
 
-    this->selectedSerialPort->setBaudRate(115200);
+    this->selectedSerialPort->setBaudRate(QSerialPort::Baud9600);
+    this->selectedSerialPort->setParity(QSerialPort::NoParity);
+    this->selectedSerialPort->setStopBits(QSerialPort::OneStop);
+    this->selectedSerialPort->setDataBits(QSerialPort::Data8);
+    this->selectedSerialPort->setFlowControl(QSerialPort::NoFlowControl);
 
     this->connect(this->ui->serialInfoAction, SIGNAL(triggered()), this, SLOT(onSerialInfoActionTriggered()));
-    this->connect(this->ui->preferencesAction, SIGNAL(triggered()), this, SLOT(onPreferencesActionTriggered()));
+    this->connect(this->ui->serialSearchAndConnectAction, SIGNAL(triggered()),
+                  this, SLOT(onSerialSearchAndConnectDialogActionTriggered()));
 
     this->connect(this->selectedSerialPort, SIGNAL(error(QSerialPort::SerialPortError)),
                   this, SLOT(onSelectedSerialPortError(QSerialPort::SerialPortError)));
@@ -62,8 +71,9 @@ MainWindow::MainWindow(QWidget *parent) :
     this->connect(this->selectedSerialPort, SIGNAL(bytesWritten(qint64)), this, SLOT(onSelectedSerialPortBytesWritten(qint64)));
 
     this->connect(&this->trySerialTimer, SIGNAL(timeout()), this, SLOT(onTrySerialTimer()));
+    this->connect(&this->delayedSendTimer, SIGNAL(timeout()), this, SLOT(onDelayedSendTimer()));
 
-    this->prefDialog = new PreferencesDialog(this->selectedSerialPort, this);
+    this->serialConnDialog = new SerialSearchAndConnectDialog(this->selectedSerialPort, this);
 
     this->serialInfoDialog = new QDialog(this);
     this->serialInfoDialog->setFixedSize(375, 400);
@@ -71,13 +81,16 @@ MainWindow::MainWindow(QWidget *parent) :
 
     this->trySerialTimer.setSingleShot(true);
     this->trySerialTimer.start(TRY_SERIAL_TIMEOUT_MS);
+    this->delayedSendTimer.setSingleShot(true);
 }
 
 MainWindow::~MainWindow() {
     this->trySerialTimer.stop();
 
-    delete this->prefDialog;
-    this->prefDialog = NULL;
+    this->writeKegMeterDataToSettings();
+
+    delete this->serialConnDialog;
+    this->serialConnDialog = NULL;
     delete this->serialInfoDialog;
     this->serialInfoDialog = NULL;
 
@@ -101,8 +114,36 @@ void MainWindow::serialLog(const QString& logStr) {
     this->ui->serialLogTextEdit->verticalScrollBar()->setValue(this->ui->serialLogTextEdit->verticalScrollBar()->maximum());
 }
 
-void MainWindow::onPreferencesActionTriggered() {
-    this->prefDialog->exec();
+void MainWindow::onDelayedSendTimer() {
+    QSettings settings;
+    for (auto iter = this->kegMeters.cbegin(); iter != this->kegMeters.cend(); ++iter) {
+        const KegMeter* meter = *iter;
+
+        // Restore settings for each of the kegs
+        QVariant data = settings.value(QString(KEG_DATA_KEY) + QString("/") + QString::number(meter->getIndex()));
+        if (!data.isNull()) {
+            assert(data.canConvert<KegMeterData>());
+            KegMeterData restoreData = data.value<KegMeterData>();
+
+            bool hasInfo = false;
+            float percent = restoreData.getPercent(hasInfo);
+            if (hasInfo && percent > 0) {
+                QString serialStr = restoreData.buildUpdateSerialStr(meter->getIndex());
+                if (!serialStr.isEmpty()) {
+                    // Send the message multiple times, just to make sure it gets there...
+                    this->serialWrite(QByteArray(serialStr.toStdString().c_str()));
+                }
+            }
+        }
+    }
+}
+
+void MainWindow::onSerialSearchAndConnectDialogActionTriggered() {
+    this->trySerialTimer.stop();
+    this->serialConnDialog->exec();
+    if (!this->selectedSerialPort->isOpen()) {
+        this->trySerialTimer.start(TRY_SERIAL_TIMEOUT_MS);
+    }
 }
 
 void MainWindow::onSerialInfoActionTriggered() {
@@ -181,6 +222,7 @@ void MainWindow::onSelectedSerialPortError(const QSerialPort::SerialPortError& e
     default:
         return;
     }
+
     if (this->selectedSerialPort->isOpen()) {
         this->selectedSerialPort->close();
     }
@@ -356,6 +398,8 @@ void MainWindow::onSelectedSerialPortReadyRead() {
             KegMeter* meter = this->kegMeters.at(data.getIndex());
             assert(meter != NULL);
             meter->setData(data);
+
+            this->writeKegMeterDataToSettings();
         }
     }
 }
@@ -366,11 +410,9 @@ void MainWindow::onSelectedSerialPortBytesWritten(qint64 bytes) {
 
 void MainWindow::onEmptyCalibration(const KegMeter& kegMeter) {
     QString serialStr("|Em");
-    serialStr += QString::number(kegMeter.getIndex());
-    QByteArray serialBytes(serialStr.toStdString().c_str());
-    this->serialWrite(serialBytes);
+    serialStr += QString("%1").arg(kegMeter.getIndex(), 3, 10, QChar('0'));
+    this->serialWrite(QByteArray(serialStr.toStdString().c_str()));
 }
-
 
 void MainWindow::onTrySerialTimer() {
     if (this->selectedSerialPort->isOpen()) {
@@ -378,17 +420,25 @@ void MainWindow::onTrySerialTimer() {
     }
 
     QList<QSerialPortInfo> ports = QSerialPortInfo::availablePorts();
+
     if (!ports.empty()) {
+
         // Try to find a port that makes sense...
         foreach (const QSerialPortInfo& port, ports) {
-            if (!port.isBusy() && port.isValid()) {
-                if (port.manufacturer().contains("Arduino", Qt::CaseInsensitive) ||
-                    port.description().contains("Arduino", Qt::CaseInsensitive)) {
+            if (!port.isBusy() && port.isValid() &&
+                 (port.manufacturer().contains("Arduino", Qt::CaseInsensitive) ||
+                 port.description().contains("Arduino", Qt::CaseInsensitive))) {
 
                     this->openSerialPort(port);
                     break;
                 }
-                else if (port.description().contains("AdafruitEZ", Qt::CaseInsensitive)) {
+            }
+
+        if (!this->selectedSerialPort->isOpen()) {
+            // Try to find a port that makes sense...
+            foreach (const QSerialPortInfo& port, ports) {
+                if (!port.isBusy() && port.isValid() &&
+                        port.description().contains("AdafruitEZ", Qt::CaseInsensitive)) {
 
                     this->openSerialPort(port);
                     break;
@@ -397,7 +447,9 @@ void MainWindow::onTrySerialTimer() {
         }
     }
 
+
     // If we still haven't found a good port then try each one...
+    /*
     if (!this->selectedSerialPort->isOpen()) {
         foreach (const QSerialPortInfo& port, ports) {
             if (port.isBusy() || !port.isValid()) {
@@ -407,13 +459,14 @@ void MainWindow::onTrySerialTimer() {
             this->openSerialPort(port);
         }
     }
+    */
 
     if (!this->selectedSerialPort->isOpen() && !this->trySerialTimer.isActive()) {
         this->trySerialTimer.start(TRY_SERIAL_TIMEOUT_MS);
     }
 }
 
-void MainWindow::serialWrite(const QByteArray &writeData) {
+void MainWindow::serialWrite(const QByteArray &writeData, bool flush) {
     //this->writeData = writeData;
 
     qint64 bytesWritten = this->selectedSerialPort->write(writeData);
@@ -423,19 +476,74 @@ void MainWindow::serialWrite(const QByteArray &writeData) {
     else if (bytesWritten != writeData.size()) {
        this->log(tr("Failed to write all the data to port %1, error: %2").arg(this->selectedSerialPort->portName()).arg(this->selectedSerialPort->errorString()));
     }
-    this->selectedSerialPort->flush();
+    else {
+        this->log(tr("Wrote serial data: ") + QString(writeData.toStdString().c_str()));
+    }
+
+    if (flush) {
+        this->selectedSerialPort->flush();
+    }
 }
 
 
 void MainWindow::openSerialPort(const QSerialPortInfo& portInfo) {
+    if (this->selectedSerialPort->isOpen()) {
+        return;
+    }
+
     this->selectedSerialPort->setPort(portInfo);
     if (this->selectedSerialPort->open(QIODevice::ReadWrite)) {
         this->log(tr("Connected to %1 @ %2 baud")
                   .arg(this->selectedSerialPort->portName())
-                  .arg(this->selectedSerialPort->baudRate())
-        );
+                  .arg(this->selectedSerialPort->baudRate()));
+
+        // Check to see if there are any previous settings...
+        QSettings settings;
+        bool previousSettingsExist = false;
+        for (auto iter = this->kegMeters.cbegin(); iter != this->kegMeters.cend(); ++iter) {
+            const KegMeter* meter = *iter;
+            // Restore settings for each of the kegs
+            QVariant data = settings.value(QString(KEG_DATA_KEY) + QString("/") + QString::number(meter->getIndex()));
+            if (!data.isNull()) {
+                assert(data.canConvert<KegMeterData>());
+                KegMeterData restoreData = data.value<KegMeterData>();
+                if (!restoreData.buildUpdateSerialStr(meter->getIndex()).isEmpty()) {
+                    previousSettingsExist = true;
+                }
+                break;
+            }
+        }
+
+        if (!previousSettingsExist) {
+            return;
+        }
+
+        // Now that the serial port is open, offer the user the ability to restore any previous
+        // known state for the keg meters
+        this->delayedSendTimer.start(1000);
     }
     else {
         this->log(tr("Failed to connect to serial port %1").arg(portInfo.portName()));
+    }
+}
+
+void MainWindow::writeKegMeterDataToSettings() const {
+    QSettings settings;
+    bool temp;
+    for (auto iter = this->kegMeters.cbegin(); iter != this->kegMeters.cend(); ++iter) {
+        const KegMeter* meter = *iter;
+
+        // Check to see if there's any actual data... if there isn't then don't overwrite it!
+        QVariant existingData = settings.value(QString(KEG_DATA_KEY) + QString("/") + QString::number(meter->getIndex()));
+        if (!existingData.isNull()) {
+            KegMeterData existingMeterData = existingData.value<KegMeterData>();
+            if ((meter->getData().buildUpdateSerialStr(meter->getIndex()).isEmpty() ||
+                 meter->getData().getPercent(temp) <= 0.0) &&
+                !existingMeterData.buildUpdateSerialStr(meter->getIndex()).isEmpty()) {
+                continue;
+            }
+        }
+
+        settings.setValue(QString(KEG_DATA_KEY) + QString("/") + QString::number(meter->getIndex()), QVariant::fromValue(meter->getData()));
     }
 }

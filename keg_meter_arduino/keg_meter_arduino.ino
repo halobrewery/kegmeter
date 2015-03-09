@@ -1,5 +1,6 @@
 #include <Adafruit_NeoPixel.h>
 #include "keg_load_meter.h"
+//#include "serial_read_helper.h"
 
 #define LED_OUTPUT_PIN 5
 #define EMPTY_CAL_BUTTON_INPUT_PIN 2
@@ -59,12 +60,11 @@ float analogToLoad(float analogVal){
 #define EMPTY_CALIBRATE_MODE_CHAR 'E'
 #define KEG_TYPE_CHANGE_CHAR 'T'
 #define QUERY_METER_CHAR 'Q'
+#define UPDATE_METER_CHAR 'U'
 #define PKG_BEGIN_CHAR '|'
-//#define PKG_END_CHAR '~'
-
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(9600);
   
   pinMode(EMPTY_CAL_BUTTON_INPUT_PIN, INPUT);
   
@@ -116,119 +116,148 @@ void doEmptyCalibrationToAllKegs() {
 
 // Checks for available serial data -- this can guide certain operations for the meters, including
 // calibration of the load sensors when no keg is placed on them ("empty calibration")
-// Empty calibration message (all meters): '|Ea~'
-// Empty calibration message (specific meter): '|Emx~', where 'x' is the zero-based index of the meter
-// Keg type message (all meters): '|Tay~', where 'y' is the type: 'c' for corny keg, and 's' for 50L sankey keg
-// Keg type message (specific meter): '|Tmxy~', where 'x' is the zero-based index of the meter, and 'y' is the type
-// Query all meters '|Qa~', this will cause all meters to output their status to serial
-// Query a given meter '|Qmx~', where 'x' is the zero-based index of the meter, this will cause serial to be output with that meter's status
+// Empty calibration message (all meters): '|Ea'
+// Empty calibration message (specific meter): '|Emxxx', where 'x' is the zero-based index of the meter (1 would be 001).
+// Keg type message (all meters): '|Tay', where 'y' is the type: 'c' for corny keg, and 's' for 50L sankey keg
+// Keg type message (specific meter): '|Tmxxxy', where 'x' is the zero-based index of the meter, and 'y' is the type
+// Query all meters '|Qa', this will cause all meters to output their status to serial
+// Query a given meter '|Qmxxx', where 'x' is the zero-based index of the meter, this will cause serial to be output with that meter's status
+// Update a given meter '|Umxxx,p.pp,fff.ff,eee.ee', where 'x' is the zero-based index of the meter, p is the percentage, f is the full amount, e is the empty amount
+
 void readSerialCommands() {
-
-  if (Serial.available() >= 3) {
-
-    char serialReadByte = Serial.read();
-    if (serialReadByte == PKG_BEGIN_CHAR) {
-      
-      // Read the command
-      serialReadByte = Serial.read();
-      switch (serialReadByte) {
-        
-        case EMPTY_CALIBRATE_MODE_CHAR:
-          while (Serial.available() == 0);
-          serialReadByte = Serial.read();
-          if (serialReadByte == ALL_METERS_CHAR) {
-            // Empty calibration for all meters
-            doEmptyCalibrationToAllKegs();
-          }
-          else if (serialReadByte == METER_SELECT_CHAR) {
-            // Empty calibration for a specific meter...
-            
-            // There should be another part of the message, wait for it
-            while (Serial.available() == 0);
-
-            // Get the meter index to calibrate for...
-            int meterIdx = Serial.parseInt();
-            if (meterIdx < NUM_KEGS && meterIdx >= 0) {
-              Serial.print("Performing Empty Calibration on keg index ");
-              Serial.print(meterIdx);
-              Serial.println("...");
-              kegMeters[meterIdx].doEmptyCalibration();
-            }
-            else {
-              Serial.print("Command failed, no keg found with index ");
-              Serial.println(meterIdx);
-            }
-          }
-          else {
-            Serial.println("Command failed, option not found.");
-          }
-          break;
-          
-        case KEG_TYPE_CHANGE_CHAR:
-          while (Serial.available() == 0);
-          serialReadByte = Serial.read();
-          if (serialReadByte == ALL_METERS_CHAR) {
-            // There should be another part of the message, wait for it
-            while (Serial.available() == 0);
-         
-            int kegType = Serial.parseInt();
-            for (int i = 0; i < NUM_KEGS; i++) {
-              setKegType(kegMeters[i], kegType);
-            }
-          }
-          else if (serialReadByte == METER_SELECT_CHAR) {
-            // There should be another part of the message, wait for it
-            while (Serial.available() == 0);
-            
-            // Get the meter index
-            int meterIdx = Serial.parseInt();
-            if (meterIdx < NUM_KEGS && meterIdx >= 0) {
-              // There should be another part of the message, wait for it
-              while (Serial.available() == 0);
-              setKegType(kegMeters[meterIdx], Serial.read());
-            }
-            else {
-              Serial.print("Command failed, no keg found with index ");
-              Serial.println(meterIdx);
-            }
-          }
-          else {
-            Serial.println("Command failed, option not found.");
-          }
-          break;
-        
-        
-        case QUERY_METER_CHAR: {
-          while (Serial.available() == 0);
-          serialReadByte = Serial.read();
-          if (serialReadByte == ALL_METERS_CHAR) {
-            for (int i = 0; i < NUM_KEGS; i++) {
-               kegMeters[i].outputStatusToSerial();
-            }
-          }
-          else if (serialReadByte == METER_SELECT_CHAR) {
-            uint8_t meterIdx = Serial.read();
-            if (meterIdx < NUM_KEGS) {
-              kegMeters[meterIdx].outputStatusToSerial();
-            }
-            else {
-              Serial.println("Command failed, invalid meter index.");
-            }       
-          }
-          else {
-            Serial.println("Command failed, option not found.");
-          }
-          break; 
-        }
-        
-        default:
-          Serial.println("No such command was found.");
-          break;    
-      }
-    }
-
-    while (Serial.available() > 0 && Serial.peek() != '|') { Serial.read(); }
+  if (Serial.available() < 2) {
+    return;
   }
+  
+  while (Serial.available() > 0 && Serial.peek() != PKG_BEGIN_CHAR) { Serial.read(); }
+  
+  if (!waitForSerial(2)) { return; }
+  Serial.read(); // Read the PKG_BEGIN_CHAR
+  char serialReadByte = Serial.read();
+  
+  Serial.print("Command received: "); Serial.println(serialReadByte);
+  
+  switch (serialReadByte) {
+    
+    case EMPTY_CALIBRATE_MODE_CHAR:
+      if (!waitForSerial(1)) { return; }
+      serialReadByte = Serial.read();
+      if (serialReadByte == ALL_METERS_CHAR) {
+        // Empty calibration for all meters
+        doEmptyCalibrationToAllKegs();
+      }
+      else {
+        // Empty calibration for a specific meter...
+        // Get the meter index to calibrate for...
+        if (!waitForSerial(3)) { return; }
+        int meterIdx = Serial.parseInt();
+        if (meterIdx < NUM_KEGS && meterIdx >= 0) {
+          Serial.print("Performing Empty Calibration on keg index ");
+          Serial.print(meterIdx);
+          Serial.println("...");
+          kegMeters[meterIdx].doEmptyCalibration();
+        }
+        else {
+          Serial.print("Command failed, no keg found with index ");
+          Serial.println(meterIdx);
+        }
+      }
+
+      break;
+      
+    case KEG_TYPE_CHANGE_CHAR:
+      if (!waitForSerial(1)) { return; }
+      serialReadByte = Serial.read();
+      if (serialReadByte == ALL_METERS_CHAR) {
+        // There should be another part of the message, wait for it
+        if (!waitForSerial(1)) { return; }
+        char kegType = Serial.read();
+        for (int i = 0; i < NUM_KEGS; i++) {
+          setKegType(kegMeters[i], kegType);
+        }
+      }
+      else {
+        // Get the meter index
+        if (!waitForSerial(3)) { return; }
+        int meterIdx = Serial.parseInt();
+        if (meterIdx < NUM_KEGS && meterIdx >= 0) {
+          // There should be another part of the message, wait for it
+          if (!waitForSerial(1)) { return; }
+          setKegType(kegMeters[meterIdx], Serial.read());
+        }
+        else {
+          Serial.print("Command failed, no keg found with index ");
+          Serial.println(meterIdx);
+        }
+      }
+
+      break;
+    
+    
+    case QUERY_METER_CHAR: {
+      if (!waitForSerial(1)) { return; }
+      serialReadByte = Serial.read();
+      if (serialReadByte == ALL_METERS_CHAR) {
+        for (int i = 0; i < NUM_KEGS; i++) {
+           kegMeters[i].outputStatusToSerial();
+        }
+      }
+      else {
+        if (!waitForSerial(3)) { return; }
+        int meterIdx = Serial.parseInt();
+        if (meterIdx < NUM_KEGS && meterIdx >= 0) {
+          kegMeters[meterIdx].outputStatusToSerial();
+        }
+        else {
+          Serial.println("Command failed, invalid meter index.");
+        }       
+      }
+
+      break; 
+    }
+    
+    case UPDATE_METER_CHAR: {
+
+      if (!waitForSerial(1)) { return; }
+      serialReadByte = Serial.read();
+      
+      if (serialReadByte == METER_SELECT_CHAR) {
+        
+        if (!waitForSerial(3)) { return; }
+        
+        int meterIdx = Serial.parseInt();
+        if (meterIdx < NUM_KEGS && meterIdx >= 0) {
+          if (!waitForSerial(19)) { return; }
+          Serial.read();
+          
+          // Read the rest of the message...
+          float percent = Serial.parseFloat();
+          Serial.read();
+
+          float fullAmt = Serial.parseFloat();
+          Serial.read();
+ 
+          float emptyAmt = Serial.parseFloat();
+          
+          kegMeters[meterIdx].setStateValues(percent, fullAmt, emptyAmt);
+          Serial.print("Updated keg "); Serial.print(meterIdx); Serial.println(" state values.");
+        }
+        else {
+          Serial.println("Command failed, invalid meter index.");
+        }
+      }
+      else {
+        Serial.println("Command failed, option not found.");
+      }
+      
+      break;
+    }
+    
+    default:
+      Serial.println("No such command was found.");
+      break;    
+  }
+ 
 }
 
 #define CORNY_KEG_CHAR 'c'
@@ -259,4 +288,12 @@ void printKegTypeSetMsg(const KegLoadMeter& kegMeter, const char* typeName) {
   Serial.print(" set to ");
   Serial.println(typeName);
 }
+
+boolean waitForSerial(int numBytes) {
+  unsigned long maxWaitTime = millis() + 150;
+  while (Serial.available() < numBytes && millis() < maxWaitTime) {} 
+  
+  return Serial.available() >= numBytes;
+}
+
 

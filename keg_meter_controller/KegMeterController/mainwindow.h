@@ -6,7 +6,7 @@
 #include <QtSerialPort/QSerialPort>
 
 class KegMeter;
-class PreferencesDialog;
+class SerialSearchAndConnectDialog;
 
 namespace Ui {
 class MainWindow;
@@ -22,8 +22,14 @@ public:
     void log(const QString& logStr, bool newLine = true);
     void serialLog(const QString& logStr);
 
+    void openSerialPort(const QSerialPortInfo& portInfo);
+
+public slots:
+    void onTrySerialTimer();
+
 private slots:
-    void onPreferencesActionTriggered();
+    void onDelayedSendTimer();
+    void onSerialSearchAndConnectDialogActionTriggered();
     void onSerialInfoActionTriggered();
 
     void onSelectedSerialPortError(const QSerialPort::SerialPortError& error);
@@ -33,12 +39,10 @@ private slots:
 
     void onEmptyCalibration(const KegMeter& kegMeter);
 
-    void onTrySerialTimer();
-
 private:
     Ui::MainWindow* ui;
     QDialog* serialInfoDialog;
-    PreferencesDialog* prefDialog;
+    SerialSearchAndConnectDialog* serialConnDialog;
 
     QSerialPort* selectedSerialPort;
     QByteArray   serialReadData;
@@ -46,12 +50,15 @@ private:
 
     static const int TRY_SERIAL_TIMEOUT_MS = 1000;
     QTimer trySerialTimer;
+    QTimer delayedSendTimer;
 
     static const int NUM_KEG_METERS = 8;
     QList<KegMeter*> kegMeters;
 
-    void serialWrite(const QByteArray &writeData);
-    void openSerialPort(const QSerialPortInfo& portInfo);
+    static const char* KEG_DATA_KEY;
+
+    void serialWrite(const QByteArray &writeData, bool flush = true);
+    void writeKegMeterDataToSettings() const;
 };
 
 #endif // KEGMETERCONTROLLER_MAINWINDOW_H

@@ -15,13 +15,14 @@ TEMPLATE = app
 SOURCES += main.cpp\
         mainwindow.cpp \
     kegmeter.cpp \
-    preferencesdialog.cpp
+    kegmeterdata.cpp \
+    serialsearchandconnectdialog.cpp
 
 HEADERS  += mainwindow.h \
     kegmeter.h \
     kegmeterdata.h \
-    preferencesdialog.h
+    serialsearchandconnectdialog.h
 
 FORMS    += mainwindow.ui \
     kegmeter.ui \
-    preferencesdialog.ui
+    serialsearchandconnectdialog.ui
