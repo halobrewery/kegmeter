@@ -6,6 +6,7 @@
 #include <QtSerialPort/QSerialPort>
 
 class MainWindow;
+class SerialComm;
 
 namespace Ui {
 class SerialSearchAndConnectDialog;
@@ -15,7 +16,7 @@ class SerialSearchAndConnectDialog : public QDialog {
     Q_OBJECT
 
 public:
-    SerialSearchAndConnectDialog(QSerialPort* serialPort, MainWindow* mainWindow);
+    SerialSearchAndConnectDialog(SerialComm* comm, MainWindow* mainWindow);
     ~SerialSearchAndConnectDialog();
 
     void showEvent(QShowEvent* event);
@@ -28,7 +29,7 @@ private slots:
 
 private:
     Ui::SerialSearchAndConnectDialog *ui;
-    QSerialPort* serialPort;
+    SerialComm* comm;
     MainWindow* mainWindow;
 };
 

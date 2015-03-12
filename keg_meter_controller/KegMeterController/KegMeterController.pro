@@ -4,7 +4,7 @@
 #
 #-------------------------------------------------
 
-QT       += core gui serialport
+QT       += core gui serialport network
 
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
@@ -16,12 +16,21 @@ SOURCES += main.cpp\
         mainwindow.cpp \
     kegmeter.cpp \
     kegmeterdata.cpp \
-    serialsearchandconnectdialog.cpp
+    serialsearchandconnectdialog.cpp \
+    serialcomm.cpp \
+    appsettings.cpp \
+    kegmeterserver.cpp \
+    kegmeterconnection.cpp
 
 HEADERS  += mainwindow.h \
     kegmeter.h \
     kegmeterdata.h \
-    serialsearchandconnectdialog.h
+    serialsearchandconnectdialog.h \
+    serialcomm.h \
+    abstractcomm.h \
+    appsettings.h \
+    kegmeterserver.h \
+    kegmeterconnection.h
 
 FORMS    += mainwindow.ui \
     kegmeter.ui \

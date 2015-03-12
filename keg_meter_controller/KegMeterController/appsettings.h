@@ -1,0 +1,11 @@
+#ifndef KEGMETERCONTROLLER_APPSETTINGS_H
+#define KEGMETERCONTROLLER_APPSETTINGS_H
+
+class AppSettings {
+public:
+    static const char* KEG_DATA_KEY;
+
+};
+
+#endif // KEGMETERCONTROLLER_APPSETTINGS_H
+

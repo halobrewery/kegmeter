@@ -10,10 +10,12 @@ namespace Ui {
 class KegMeter;
 }
 
+class AbstractComm;
+
 class KegMeter : public QWidget {
     Q_OBJECT
 public:
-    explicit KegMeter(int id, QWidget *parent = NULL);
+    explicit KegMeter(int id, AbstractComm* comm, QWidget* parent);
     ~KegMeter();
 
     int getId() const { return this->id; }
@@ -22,14 +24,14 @@ public:
     void setData(const KegMeterData& data);
     const KegMeterData& getData() const { return this->currData; }
 
-signals:
-    void doEmptyCalibration(const KegMeter& kegMeter);
-
 private slots:
-    void onEmptyCalibrationTriggered() { emit doEmptyCalibration(*this); }
+    void onEmptyCalibration();
+    void onReset();
     void onDataTimeout();
 
 private:
+    AbstractComm* comm; // Not owned by this
+
     Ui::KegMeter* ui;
     int id;
     KegMeterData currData;

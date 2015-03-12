@@ -29,7 +29,7 @@ const uint8_t KegLoadMeter::BASE_CALIBRATING_BRIGHTNESS = 80;
 #define MAX_FULL_CORNEY_KEG_MASS_KG (AVG_EMPTY_CORNY_KEG_MASS_KG + 21)
 
 #define MINIMUM_VARIANCE_TO_FINISH_CALIBRATING (0.01)
-#define MIN_TRUSTWORTHY_VARIANCE_WHILE_MEASURING (0.1)
+#define MIN_TRUSTWORTHY_VARIANCE_WHILE_MEASURING (0.025)
 
 static float LERP(float x, float x0, float x1, float y0, float y1) {
   return (y0 + (y1-y0)*(x-x0)/(x1-x0));
@@ -50,7 +50,7 @@ static float LERP(float x, float x0, float x1, float y0, float y1) {
 KegLoadMeter::KegLoadMeter(uint8_t meterIdx, Adafruit_NeoPixel& strip) : 
   meterIdx(meterIdx), startLEDIdx(meterIdx*NUM_LEDS_PER_METER), loadWindowIdx(0), 
   calibratingAnimLEDIdx(0), calibratedAnimLEDIdx(0), currState(Empty), strip(strip), 
-  calibratedEmptyLoadAmt(0), delayCounterMillis(0), 
+  calibratedEmptyLoadAmt(0), delayCounterMillis(0), runningAvgVariance(0.1),
   dataCounter(0), detectedEmptyKegMass(AVG_EMPTY_CORNY_KEG_MASS_KG) {
   
   // Fill the load window with empty data
@@ -75,16 +75,17 @@ void KegLoadMeter::setKegType(KegType kegType) {
 void KegLoadMeter::setStateValues(float percent, float fullAmt, float emptyAmt) {
   // Fill the window with the value...
   float currMass = fullAmt * percent;
-  for (int i = 0; i < LOAD_WINDOW_SIZE; i++) {
-    this->loadWindow[i] = currMass;
-  }
-  this->loadWindowSum = currMass * LOAD_WINDOW_SIZE;
-  this->loadWindowVariance = 0;
+  this->fillLoadWindow(currMass);
   
   this->setState(Measuring);
   this->lastPercentAmt = percent;
   this->calibratedFullLoadAmt  = fullAmt;
   this->calibratedEmptyLoadAmt = emptyAmt;
+}
+
+void KegLoadMeter::setEmpty() {
+  this->setState(Empty);
+  this->fillLoadWindow(0.0);
 }
 
 void KegLoadMeter::tick(uint32_t frameDeltaMillis, float approxLoadInKg) {
@@ -125,7 +126,7 @@ void KegLoadMeter::tick(uint32_t frameDeltaMillis, float approxLoadInKg) {
       #endif
 
       // Waiting until someone puts a new full/partially-full keg on the sensor...
-      if (abs(this->loadWindowVariance) <= MINIMUM_VARIANCE_TO_FINISH_CALIBRATING && 
+      if (this->runningAvgVariance <= MINIMUM_VARIANCE_TO_FINISH_CALIBRATING && 
           this->getLoadWindowMean() >= this->getEmptyToCalMinMass()) {
             
         this->setState(Calibrating);
@@ -178,14 +179,13 @@ void KegLoadMeter::tick(uint32_t frameDeltaMillis, float approxLoadInKg) {
       
     case Measuring: {
  
-      float currPercentAmt = this->lastPercentAmt;
-      float tempPercentAmt =  max(0.0, min(1.0, LERP(this->getLoadWindowMean(),
-        (this->calibratedEmptyLoadAmt + this->detectedEmptyKegMass), this->calibratedFullLoadAmt, 0.0, 1.0)));
-        
-      if (abs(this->loadWindowVariance) <= MIN_TRUSTWORTHY_VARIANCE_WHILE_MEASURING || (currPercentAmt-tempPercentAmt) <= 0.001) {
+
+      float currPercentAmt = this->lastPercentAmt;        
+      if (this->runningAvgVariance <= MIN_TRUSTWORTHY_VARIANCE_WHILE_MEASURING) {
         // The meter is being set by the current load amount based on a linear interpolation between
         // the initial calibrated full load and a reasonable "zero" load
-        currPercentAmt = tempPercentAmt;
+        currPercentAmt = max(0.0, min(1.0, LERP(this->getLoadWindowMean(),
+        (this->calibratedEmptyLoadAmt + this->detectedEmptyKegMass), this->calibratedFullLoadAmt, 0.0, 1.0)));;
         
         // Running average to make sure we don't overreact to small changes in the mass
         currPercentAmt = 0.99*this->lastPercentAmt + 0.01*currPercentAmt;
@@ -426,7 +426,7 @@ void KegLoadMeter::turnOff() {
 
 void KegLoadMeter::outputStatusToSerial() const {
   KegMeterProtocol::OutputStatusMsg(this->getIndex(), this->calibratedFullLoadAmt, 
-    this->calibratedEmptyLoadAmt, this->lastPercentAmt, this->getLoadWindowMean(), this->loadWindowVariance);
+    this->calibratedEmptyLoadAmt, this->lastPercentAmt, this->getLoadWindowMean(), this->runningAvgVariance);
 }
 
 uint32_t KegLoadMeter::getEmptyAnimationColour(uint8_t cycleIdx) const {
@@ -479,6 +479,7 @@ void KegLoadMeter::putInLoadWindow(float value) {
     this->loadWindowVariance += newVarianceValue;
   }
   
+  this->runningAvgVariance = 0.99*this->runningAvgVariance + 0.01*abs(this->loadWindowVariance);
 }
 
 float KegLoadMeter::getEmptyToCalMinMass() const { 

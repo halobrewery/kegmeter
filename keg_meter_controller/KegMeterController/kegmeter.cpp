@@ -1,13 +1,22 @@
 #include "kegmeter.h"
 #include "ui_kegmeter.h"
+#include "abstractcomm.h"
 
-KegMeter::KegMeter(int id, QWidget *parent) : QWidget(parent), ui(new Ui::KegMeter()), id(id) {
+KegMeter::KegMeter(int id, AbstractComm* comm, QWidget* parent) :
+    QWidget(parent),
+    comm(comm),
+    ui(new Ui::KegMeter()),
+    id(id) {
+
+    assert(comm != NULL);
+
     this->ui->setupUi(this);
     this->ui->kegMeterGrpBox->setTitle(tr("Keg Meter ") + QString::number(id, 10));
 
     this->connect(&this->timer, SIGNAL(timeout()), this, SLOT(onDataTimeout()));
     this->connect(this->ui->emptyCalBtn, SIGNAL(clicked()),
-                  this, SLOT(onEmptyCalibrationTriggered()));
+                  this, SLOT(onEmptyCalibration()));
+    this->connect(this->ui->resetBtn, SIGNAL(clicked()), this, SLOT(onReset()));
 
     this->timer.setSingleShot(true);
 
@@ -58,6 +67,18 @@ void KegMeter::setData(const KegMeterData& data) {
 
     this->setEnabled(true);
     this->timer.start(DATA_TIMEOUT_MS);
+}
+
+void KegMeter::onEmptyCalibration() {
+    QString serialStr("|Em");
+    serialStr += QString("%1").arg(this->getIndex(), 3, 10, QChar('0'));
+    this->comm->writeString(serialStr);
+}
+
+void KegMeter::onReset() {
+    QString serialStr("|Rm");
+    serialStr += QString("%1").arg(this->getIndex(), 3, 10, QChar('0'));
+    this->comm->writeString(serialStr);
 }
 
 void KegMeter::onDataTimeout() {

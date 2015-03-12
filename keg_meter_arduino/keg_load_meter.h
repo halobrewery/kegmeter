@@ -21,14 +21,9 @@ public:
   void doEmptyCalibration() { this->setState(EmptyCalibration); }
   void setKegType(KegType kegType);
   void setStateValues(float percent, float fullAmt, float emptyAmt);
+  void setEmpty();
 
   void tick(uint32_t frameDeltaMillis, float approxLoadInKg);
-  
-  boolean showEmptyAnimation(uint8_t pulseTimeInMillis, uint8_t numPulses);
-  void showCalibratingAnimation(uint8_t delayMillis, float percentCalibrated, boolean resetDelayCounter = false);
-  boolean showCalibratedAnimation(uint8_t delayMillis);
-  
-  void turnOff();
 
   void outputStatusToSerial() const;
   
@@ -43,6 +38,7 @@ private:
   uint16_t calibratedAnimLEDIdx; // State: Calibrated
   float calibratedFullLoadAmt;   // State: Calibrated, Measuring
   float lastPercentAmt;
+  float runningAvgVariance;
   uint8_t emptyAnimPulseCount;
   float calibratedEmptyLoadAmt;  // State: EmptyCalibration, Empty, JustBecameEmpty, Measuring
   float detectedEmptyKegMass;
@@ -55,6 +51,11 @@ private:
   
   Adafruit_NeoPixel& strip;  // The LED strip object
   
+  static const uint8_t ALIVE_BRIGHTNESS;
+  static const uint8_t DEAD_BRIGHTNESS;
+  static const uint8_t DEATH_PULSE_BRIGHTNESS;
+  static const uint8_t BASE_CALIBRATING_BRIGHTNESS;
+  
   enum State {
     EmptyCalibration, // Calibration of the load sensor for this meter when nothing has been placed on it
     Empty,            // State to rest in when the keg is empty or there is no keg on the sensor for this meter
@@ -65,11 +66,12 @@ private:
   } currState;
 
   void setState(State newState);
+
+  boolean showEmptyAnimation(uint8_t pulseTimeInMillis, uint8_t numPulses);
+  void showCalibratingAnimation(uint8_t delayMillis, float percentCalibrated, boolean resetDelayCounter = false);
+  boolean showCalibratedAnimation(uint8_t delayMillis);
   
-  static const uint8_t ALIVE_BRIGHTNESS;
-  static const uint8_t DEAD_BRIGHTNESS;
-  static const uint8_t DEATH_PULSE_BRIGHTNESS;
-  static const uint8_t BASE_CALIBRATING_BRIGHTNESS;
+  void turnOff();
   
   void setMeterPercentage(float percent, boolean drawEmptyLEDs = true);
   

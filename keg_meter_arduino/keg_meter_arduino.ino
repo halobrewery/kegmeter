@@ -59,8 +59,8 @@ float analogToLoad(float analogVal){
 #define ALL_METERS_CHAR 'a'
 #define EMPTY_CALIBRATE_MODE_CHAR 'E'
 #define KEG_TYPE_CHANGE_CHAR 'T'
-#define QUERY_METER_CHAR 'Q'
 #define UPDATE_METER_CHAR 'U'
+#define RESET_METER_CHAR 'R'
 #define PKG_BEGIN_CHAR '|'
 
 void setup() {
@@ -120,9 +120,8 @@ void doEmptyCalibrationToAllKegs() {
 // Empty calibration message (specific meter): '|Emxxx', where 'x' is the zero-based index of the meter (1 would be 001).
 // Keg type message (all meters): '|Tay', where 'y' is the type: 'c' for corny keg, and 's' for 50L sankey keg
 // Keg type message (specific meter): '|Tmxxxy', where 'x' is the zero-based index of the meter, and 'y' is the type
-// Query all meters '|Qa', this will cause all meters to output their status to serial
-// Query a given meter '|Qmxxx', where 'x' is the zero-based index of the meter, this will cause serial to be output with that meter's status
 // Update a given meter '|Umxxx,p.pp,fff.ff,eee.ee', where 'x' is the zero-based index of the meter, p is the percentage, f is the full amount, e is the empty amount
+// Reset a given meter '|Rmxxx', where 'x' is the zero-based index of the meter
 
 void readSerialCommands() {
   if (Serial.available() < 2) {
@@ -134,9 +133,7 @@ void readSerialCommands() {
   if (!waitForSerial(2)) { return; }
   Serial.read(); // Read the PKG_BEGIN_CHAR
   char serialReadByte = Serial.read();
-  
-  Serial.print("Command received: "); Serial.println(serialReadByte);
-  
+
   switch (serialReadByte) {
     
     case EMPTY_CALIBRATE_MODE_CHAR:
@@ -158,8 +155,7 @@ void readSerialCommands() {
           kegMeters[meterIdx].doEmptyCalibration();
         }
         else {
-          Serial.print("Command failed, no keg found with index ");
-          Serial.println(meterIdx);
+          Serial.print("ERROR: Invalid meter index.");
         }
       }
 
@@ -186,35 +182,11 @@ void readSerialCommands() {
           setKegType(kegMeters[meterIdx], Serial.read());
         }
         else {
-          Serial.print("Command failed, no keg found with index ");
-          Serial.println(meterIdx);
+          Serial.print("ERROR: Invalid meter index.");
         }
       }
 
       break;
-    
-    
-    case QUERY_METER_CHAR: {
-      if (!waitForSerial(1)) { return; }
-      serialReadByte = Serial.read();
-      if (serialReadByte == ALL_METERS_CHAR) {
-        for (int i = 0; i < NUM_KEGS; i++) {
-           kegMeters[i].outputStatusToSerial();
-        }
-      }
-      else {
-        if (!waitForSerial(3)) { return; }
-        int meterIdx = Serial.parseInt();
-        if (meterIdx < NUM_KEGS && meterIdx >= 0) {
-          kegMeters[meterIdx].outputStatusToSerial();
-        }
-        else {
-          Serial.println("Command failed, invalid meter index.");
-        }       
-      }
-
-      break; 
-    }
     
     case UPDATE_METER_CHAR: {
 
@@ -243,18 +215,38 @@ void readSerialCommands() {
           Serial.print("Updated keg "); Serial.print(meterIdx); Serial.println(" state values.");
         }
         else {
-          Serial.println("Command failed, invalid meter index.");
+          Serial.println("ERROR: Invalid meter index.");
         }
       }
       else {
-        Serial.println("Command failed, option not found.");
+        Serial.println("ERROR: Command option not found.");
       }
       
       break;
     }
     
+    case RESET_METER_CHAR: {
+      if (!waitForSerial(1)) { return; }
+      serialReadByte = Serial.read();
+      
+      if (serialReadByte == METER_SELECT_CHAR) {
+        if (!waitForSerial(3)) { return; }
+        int meterIdx = Serial.parseInt();
+        if (meterIdx < NUM_KEGS && meterIdx >= 0) {
+          kegMeters[meterIdx].setEmpty();
+        }
+        else {
+          Serial.println("ERROR: Invalid meter index.");
+        }
+      }
+      else {
+        Serial.println("ERROR: Command option not found.");
+      }
+      break; 
+    }
+    
     default:
-      Serial.println("No such command was found.");
+      Serial.println("ERROR: No command found.");
       break;    
   }
  

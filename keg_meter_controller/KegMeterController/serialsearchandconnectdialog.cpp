@@ -1,15 +1,16 @@
 #include "serialsearchandconnectdialog.h"
 #include "ui_SerialSearchAndConnectDialog.h"
 #include "mainwindow.h"
+#include "serialcomm.h"
 
 #include <QSerialPortInfo>
 
 #include <cassert>
 
-SerialSearchAndConnectDialog::SerialSearchAndConnectDialog(QSerialPort* serialPort, MainWindow* mainWindow) :
+SerialSearchAndConnectDialog::SerialSearchAndConnectDialog(SerialComm* comm, MainWindow* mainWindow) :
     QDialog(mainWindow),
     ui(new Ui::SerialSearchAndConnectDialog()),
-    serialPort(serialPort),
+    comm(comm),
     mainWindow(mainWindow) {
 
     ui->setupUi(this);
@@ -30,15 +31,18 @@ SerialSearchAndConnectDialog::~SerialSearchAndConnectDialog() {
 }
 
 void SerialSearchAndConnectDialog::showEvent(QShowEvent*) {
+    QSerialPort* serialPort = this->comm->getSerialPort();
+    assert(serialPort != NULL);
+
     // Populate the ports...
     this->ui->portComboBox->clear();
     QList<QSerialPortInfo> portList = QSerialPortInfo::availablePorts();
     foreach(const QSerialPortInfo& portInfo, portList) {
         this->ui->portComboBox->addItem(portInfo.portName());
     }
-    this->ui->portComboBox->setCurrentText(this->serialPort->portName());
+    this->ui->portComboBox->setCurrentText(serialPort->portName());
 
-    this->ui->baudComboBox->setCurrentText(QString::number(this->serialPort->baudRate()));
+    this->ui->baudComboBox->setCurrentText(QString::number(serialPort->baudRate()));
 }
 
 void SerialSearchAndConnectDialog::onPortComboBoxCurrentIndexChanged(const QString&) {
@@ -48,14 +52,15 @@ void SerialSearchAndConnectDialog::onBaudComboBoxCurrentIndexChanged(const QStri
 }
 
 void SerialSearchAndConnectDialog::onReconnectButtonClicked() {
+    QSerialPort* serialPort = this->comm->getSerialPort();
     if (this->ui->manualRadio->isChecked()) {
-        this->serialPort->setBaudRate(this->ui->baudComboBox->currentText().toInt());
+        serialPort->setBaudRate(this->ui->baudComboBox->currentText().toInt());
 
         auto ports = QSerialPortInfo::availablePorts();
         foreach (const QSerialPortInfo& portInfo, ports) {
             if (portInfo.portName() == this->ui->portComboBox->currentText()) {
-                this->serialPort->close();
-                this->mainWindow->openSerialPort(portInfo);
+                serialPort->close();
+                this->comm->openSerialPort(portInfo);
             }
         }
 
@@ -64,8 +69,8 @@ void SerialSearchAndConnectDialog::onReconnectButtonClicked() {
     }
 
     // Attempt to auto connect, again...
-    this->serialPort->close();
-    this->mainWindow->onTrySerialTimer();
+    serialPort->close();
+    this->comm->onTrySerialTimer();
 }
 
 void SerialSearchAndConnectDialog::autoManualButtonToggled() {

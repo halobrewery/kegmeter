@@ -8,6 +8,7 @@
 int main(int argc, char *argv[])
 {
     qRegisterMetaTypeStreamOperators<KegMeterData>("KegMeterData");
+    qRegisterMetaType<KegMeterData>();
 
     QApplication a(argc, argv);
 
