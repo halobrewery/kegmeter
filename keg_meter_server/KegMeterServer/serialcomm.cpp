@@ -1,10 +1,10 @@
 #include "serialcomm.h"
 #include "mainwindow.h"
-#include "kegmeterdata.h"
 #include "kegmeter.h"
 #include "appsettings.h"
 #include "serialsearchandconnectdialog.h"
 
+#include <QTextStream>
 #include <QSettings>
 #include <QSerialPortInfo>
 
@@ -27,8 +27,8 @@ SerialComm::SerialComm(MainWindow* mainWindow) :
     this->connect(this->serialPort, SIGNAL(readyRead()), this, SLOT(onSerialPortReadyRead()));
     this->connect(this->serialPort, SIGNAL(bytesWritten(qint64)), this, SLOT(onSerialPortBytesWritten(qint64)));
 
-    this->connect(&this->trySerialTimer, SIGNAL(timeout()), this, SLOT(onTrySerialTimer()));
     this->connect(&this->delayedSendTimer, SIGNAL(timeout()), this, SLOT(onDelayedSendTimer()));
+    this->connect(&this->trySerialTimer, SIGNAL(timeout()), this, SLOT(onTrySerialTimer()));
 
     this->trySerialTimer.setSingleShot(true);
     this->trySerialTimer.start(TRY_SERIAL_TIMEOUT_MS);
@@ -49,6 +49,10 @@ SerialComm::~SerialComm() {
 }
 
 void SerialComm::write(const QByteArray &data) {
+    if (!this->serialPort->isOpen()) {
+        return;
+    }
+
     this->commWriteData = data;
 
     qint64 bytesWritten = this->serialPort->write(data);
@@ -111,6 +115,13 @@ void SerialComm::onTrySerialTimer() {
     }
 }
 
+void SerialComm::onDelayedSendTimer() {
+    auto kegMeters = this->mainWindow->getKegMeters();
+    foreach (auto* kegMeter, kegMeters) {
+        kegMeter->outputSync();
+    }
+}
+
 void SerialComm::onSerialPortError(const QSerialPort::SerialPortError&) {
     QString errorMsg = this->serialPort->errorString();
     if (!errorMsg.isEmpty()) {
@@ -122,7 +133,11 @@ void SerialComm::onSerialPortError(const QSerialPort::SerialPortError&) {
 }
 
 void SerialComm::onSerialPortClose() {
-    emit commClosed();
+    // Disable all of the meter GUIs
+    auto kegMeters = this->mainWindow->getKegMeters();
+    foreach (auto* kegMeter, kegMeters) {
+        kegMeter->setEnabled(false);
+    }
 
     if (!this->trySerialTimer.isActive()) {
         this->trySerialTimer.start(TRY_SERIAL_TIMEOUT_MS);
@@ -179,7 +194,7 @@ void SerialComm::onSerialPortReadyRead() {
 
         // Make sure it's a valid package...
         int pkgLen = endIdx;
-        if (pkgLen < 8) {
+        if (pkgLen < 6) {
             this->commReadData.remove(0,1);
             continue;
         }
@@ -191,91 +206,42 @@ void SerialComm::onSerialPortReadyRead() {
 
         QTextStream pkgTextStream(&pkgStr);
 
-        int id;
-        pkgTextStream >> id;
-        if (pkgTextStream.status() != QTextStream::Ok || id >= this->mainWindow->getNumKegMeters() || id < 0) {
+        int meterIdx;
+        pkgTextStream >> meterIdx;
+        if (pkgTextStream.status() != QTextStream::Ok || meterIdx >= this->mainWindow->getNumKegMeters() || meterIdx < 0) {
             this->commReadData.remove(0,1);
             continue;
         }
 
-        KegMeterData data(id);
-
         char temp;
-        pkgTextStream >> temp; // '{'
-        if (pkgTextStream.status() != QTextStream::Ok || temp != '{') {
+        pkgTextStream >> temp; // ' '
+        if (pkgTextStream.status() != QTextStream::Ok || temp != ' ') {
             this->commReadData.remove(0,1);
             continue;
         }
 
         bool exitLoop = false;
-        bool success = false;
-        while (!exitLoop && !success) {
+        while (!exitLoop) {
 
             pkgTextStream >> temp;
             if (pkgTextStream.status() != QTextStream::Ok) { exitLoop = true; break; }
 
             switch (temp) {
-            case 'P': {
-                pkgTextStream >> temp; // ':'
-                if (temp != ':' || pkgTextStream.status() != QTextStream::Ok) { exitLoop = true; break; }
-                float percent = 0;
-                pkgTextStream >> percent;
-                data.setPercent(percent);
-                break;
-            }
 
-            case 'F': {
-                pkgTextStream >> temp; // ':'
-                if (temp != ':' || pkgTextStream.status() != QTextStream::Ok) { exitLoop = true; break; }
+            case 'M': {
+                pkgTextStream >> temp; // ' '
+                if (temp != ' ' || pkgTextStream.status() != QTextStream::Ok) { exitLoop = true; break; }
 
-                float fullMass = 0;
-                pkgTextStream >> fullMass;
-                data.setFullMass(fullMass);
+                float measurement = 0;
+                pkgTextStream >> measurement;
 
-                break;
-            }
+                KegMeter* kegMeter = this->mainWindow->getKegMeters().at(meterIdx);
+                assert(kegMeter != NULL);
+                kegMeter->updateLoadMeasurement(measurement);
 
-            case 'E': {
-                pkgTextStream >> temp; // ':'
-                if (temp != ':' || pkgTextStream.status() != QTextStream::Ok) { exitLoop = true; break; }
-
-                float emptyMass = 0;
-                pkgTextStream >> emptyMass;
-                data.setEmptyMass(emptyMass);
-
-                break;
-            }
-
-            case 'L': {
-                pkgTextStream >> temp; // ':'
-                if (temp != ':' || pkgTextStream.status() != QTextStream::Ok) { exitLoop = true; break; }
-
-                float load = 0;
-                pkgTextStream >> load;
-                data.setLoad(load);
-
-                break;
-            }
-
-            case 'V': {
-                pkgTextStream >> temp; // ':'
-                if (temp != ':' || pkgTextStream.status() != QTextStream::Ok) { exitLoop = true; break; }
-
-                float variance = 0;
-                pkgTextStream >> variance;
-                data.setVariance(variance);
-
-                break;
-            }
-
-            case ',':
-                // Ignore commas, they separate the parameters
-                break;
-
-            case '}':
-                success  = true;
                 exitLoop = true;
                 break;
+            }
 
             default:
                 exitLoop = true;
@@ -285,33 +251,6 @@ void SerialComm::onSerialPortReadyRead() {
 
         // Remove the package from the serialReadData -- we do this by just removing the start character
         this->commReadData.remove(0,1);
-
-        if (success) {
-            emit kegMeterDataAvailable(data);
-
-        }
-    }
-}
-
-void SerialComm::onDelayedSendTimer() {
-    QSettings settings;
-    for (int i = 0; i < this->mainWindow->getNumKegMeters(); i++) {
-        // Restore settings for each of the kegs
-        QVariant data = settings.value(QString(AppSettings::KEG_DATA_KEY) + QString("/") + QString::number(i, 10));
-        if (!data.isNull()) {
-            assert(data.canConvert<KegMeterData>());
-            KegMeterData restoreData = data.value<KegMeterData>();
-
-            bool hasInfo = false;
-            float percent = restoreData.getPercent(hasInfo);
-            if (hasInfo && percent > 0) {
-                QString serialStr = restoreData.buildUpdateSerialStr(i);
-                if (!serialStr.isEmpty()) {
-                    // Send the message multiple times, just to make sure it gets there...
-                    this->writeString(serialStr);
-                }
-            }
-        }
     }
 }
 
@@ -325,27 +264,6 @@ void SerialComm::openSerialPort(const QSerialPortInfo& portInfo) {
         this->mainWindow->log(tr("Connected to %1 @ %2 baud")
                   .arg(this->serialPort->portName())
                   .arg(this->serialPort->baudRate()));
-
-        // Check to see if there are any previous settings...
-        QSettings settings;
-        bool previousSettingsExist = false;
-        for (int i = 0; i < this->mainWindow->getNumKegMeters(); i++) {
-            // Restore settings for each of the kegs
-            QVariant data = settings.value(QString(AppSettings::KEG_DATA_KEY) +
-                                           QString("/") + QString::number(i, 10));
-            if (!data.isNull()) {
-                assert(data.canConvert<KegMeterData>());
-                KegMeterData restoreData = data.value<KegMeterData>();
-                if (!restoreData.buildUpdateSerialStr(i).isEmpty()) {
-                    previousSettingsExist = true;
-                }
-                break;
-            }
-        }
-
-        if (!previousSettingsExist) {
-            return;
-        }
 
         // Now that the serial port is open, offer the user the ability to restore any previous
         // known state for the keg meters

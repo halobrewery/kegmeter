@@ -31,7 +31,7 @@ private:
   ~KegMeterProtocol() {}
   
   static void OutputKegNumberStr(uint8_t meterId) { Serial.print(meterId); } 
-  static void OutputStartPkg() { Serial.print("[<<<"); }
+  static void OutputStartPkg() { Serial.print("["); }
   static void OutputEndPkg() { Serial.println("]"); }
   
 };
